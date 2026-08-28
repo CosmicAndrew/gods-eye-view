@@ -45,6 +45,18 @@ if ($envText -match 'GOOGLE_MAPS_API_KEY=PASTE_YOUR') {
   Write-Warning 'GOOGLE_MAPS_API_KEY is still the placeholder - the globe will not render tiles.'
 }
 
+# vite.config.js fills process.env only where a key is UNDEFINED, so an inherited
+# shell variable silently outranks .env and the file looks ignored. When .env
+# names a key for this project, that is the deliberate one: drop the inherited
+# value for this process so the file wins. Scoped to this launch only - the
+# user-level variable other tools read is untouched.
+foreach ($name in @('OPENAI_API_KEY', 'GOOGLE_MAPS_API_KEY')) {
+  if ($envText -match "(?m)^\s*$name\s*=\s*\S" -and (Test-Path "Env:$name")) {
+    Remove-Item "Env:$name"
+    Write-Host "Using $name from .env (inherited shell value ignored for this run)." -ForegroundColor DarkGray
+  }
+}
+
 $port = 4173
 $url = "http://localhost:$port"
 
