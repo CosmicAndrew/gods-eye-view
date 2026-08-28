@@ -1,0 +1,8 @@
+node_modules
+dist
+.git
+.env
+.gev-cache
+qa-shots
+docs/media
+*.log

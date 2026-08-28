@@ -44,6 +44,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { defineConfig, loadEnv } from 'vite';
 import cesium from 'vite-plugin-cesium';
+import { basicAuthGate } from './src/server/basicAuthGate.js';
 import { normalizeRadioCountryInput } from './src/data/radioCountry.js';
 import {
   normalizeRegionalArticles,
@@ -7355,6 +7356,10 @@ export default defineConfig(({ mode }) => {
   const env = { ...process.env };
   return {
     plugins: [
+      // First, so nothing behind it - assets, proxies, the OpenAI token minter -
+      // is reachable unauthenticated. Uninstalled entirely when unset, so
+      // localhost is unaffected.
+      basicAuthGate({ user: env.GEV_AUTH_USER, password: env.GEV_AUTH_PASSWORD }),
       cesium(),
       ...[
         openSkyProxy(),
@@ -7385,6 +7390,23 @@ export default defineConfig(({ mode }) => {
       allowedHosts: (env.HOST === '0.0.0.0' || env.HOST === '::')
         ? true
         : ['localhost', '127.0.0.1', '.local'],
+    },
+    // `vite preview` is what serves a deployment here, because the whole API
+    // surface is plugin middleware. A PaaS injects PORT and needs 0.0.0.0, and
+    // Vite refuses a Host header it does not know - unset, that is a blank page
+    // on the deploy URL with a working server behind it.
+    preview: {
+      host: env.HOST || 'localhost',
+      port: parseInt(env.PORT, 10) || 4173,
+      // RAILWAY_PUBLIC_DOMAIN is injected by the platform, which avoids the
+      // bootstrap problem of needing the deploy URL before the first deploy
+      // exists. GEV_ALLOWED_HOSTS covers a custom domain or another host.
+      allowedHosts: [
+        'localhost',
+        '127.0.0.1',
+        env.RAILWAY_PUBLIC_DOMAIN,
+        ...(env.GEV_ALLOWED_HOSTS ? env.GEV_ALLOWED_HOSTS.split(',') : []),
+      ].map((host) => host?.trim()).filter(Boolean),
     },
     // Expose selected API keys to the browser via import.meta.env.*
     define: {
