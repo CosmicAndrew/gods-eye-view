@@ -7324,6 +7324,21 @@ function normalizeAisTimestamp(value) {
 }
 
 /**
+ * Serve a proxy plugin's dev middleware on the production preview server too.
+ *
+ * This app's backend is the proxy middleware below, so a plugin that implements
+ * only `configureServer` disappears from `vite preview`: the built app loses
+ * that data source with no error at all — the layer just stays empty. Vite
+ * invokes hooks with its own `this`, so the dev hook is reused as a plain
+ * function reference rather than delegated through the object. A plugin that
+ * already defines its own preview hook is returned untouched.
+ */
+function alsoServePreview(plugin) {
+  if (plugin.configurePreviewServer || !plugin.configureServer) return plugin;
+  return { ...plugin, configurePreviewServer: plugin.configureServer };
+}
+
+/**
  * Main Vite configuration factory.
  *
  * Loads .env files via Vite's loadEnv, registers Cesium + local proxy
@@ -7341,25 +7356,27 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       cesium(),
-      openSkyProxy(),
-      celestrakProxy(),
-      tomtomProxy(),
-      firmsProxy(),
-      rocketLaunchesProxy(),
-      terrainHeightsProxy(),
-      adsbdbProxy(),
-      overpassProxy(),
-      militaryInstallationsProxy(),
-      regionalBriefProxy(),
-      weatherEffectsProxy(),
-      cctvProxy(),
-      radioBrowserProxy(),
-      gbfsProxy(),
-      adsbLolProxy(),
-      aisLiveProxy(),
-      trackBackfillProxies(),
-      openAiRealtimeProxy(),
-      googlePlacesContextProxy(),
+      ...[
+        openSkyProxy(),
+        celestrakProxy(),
+        tomtomProxy(),
+        firmsProxy(),
+        rocketLaunchesProxy(),
+        terrainHeightsProxy(),
+        adsbdbProxy(),
+        overpassProxy(),
+        militaryInstallationsProxy(),
+        regionalBriefProxy(),
+        weatherEffectsProxy(),
+        cctvProxy(),
+        radioBrowserProxy(),
+        gbfsProxy(),
+        adsbLolProxy(),
+        aisLiveProxy(),
+        trackBackfillProxies(),
+        openAiRealtimeProxy(),
+        googlePlacesContextProxy(),
+      ].map(alsoServePreview),
     ],
     server: {
       host: env.HOST || 'localhost',
