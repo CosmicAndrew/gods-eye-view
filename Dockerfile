@@ -78,6 +78,14 @@ COPY --from=build /app/src ./src
 COPY --from=build /app/config ./config
 COPY --from=build /app/public ./public
 
+# Seed the proxy's disk cache with orbital elements. celestrak.org is globally
+# unreachable and has no working mirror, so a fresh container answered every
+# /api/celestrak/* with 502 and the satellite layer rendered nothing - the
+# proxy serves stale on upstream failure, but had nothing stale to serve. The
+# moment celestrak answers again these are overwritten with fresh data. See
+# seed-cache/README.md.
+COPY --from=build /app/seed-cache/celestrak-*.json ./.gev-cache/
+
 # The port is read from $PORT at runtime (see the `preview` block in vite.config.js).
 EXPOSE 4173
 

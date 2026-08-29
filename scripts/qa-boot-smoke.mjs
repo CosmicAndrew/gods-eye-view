@@ -41,6 +41,12 @@ try {
   const page = await browser.newPage();
   await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
 
+  const auth = arg('--auth', null);
+  if (auth) {
+    const [username, ...rest] = auth.split(':');
+    await page.authenticate({ username, password: rest.join(':') });
+  }
+
   const consoleErrors = [];
   const pageErrors = [];
   const failedRequests = [];
