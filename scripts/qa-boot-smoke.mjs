@@ -32,6 +32,9 @@ const gpuArgs = argv.includes('--force-gpu') ? ['--force-high-performance-gpu'] 
 const browser = await puppeteer.launch({
   headless: !headful,
   ...(chromePath ? { executablePath: chromePath } : {}),
+  // The frame-rate probe blocks its execution context for a full sampling
+  // window, which outruns the 30s default and aborts the run.
+  protocolTimeout: 180_000,
   args: headful
     ? gpuArgs
     : ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', ...gpuArgs],
