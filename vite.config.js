@@ -45,6 +45,7 @@ import { createRequire } from 'node:module';
 import { defineConfig, loadEnv } from 'vite';
 import cesium from 'vite-plugin-cesium';
 import { basicAuthGate } from './src/server/basicAuthGate.js';
+import { immutableAssets } from './src/server/immutableAssets.js';
 import { normalizeRadioCountryInput } from './src/data/radioCountry.js';
 import {
   normalizeRegionalArticles,
@@ -7360,6 +7361,8 @@ export default defineConfig(({ mode }) => {
       // is reachable unauthenticated. Uninstalled entirely when unset, so
       // localhost is unaffected.
       basicAuthGate({ user: env.GEV_AUTH_USER, password: env.GEV_AUTH_PASSWORD }),
+      // After the gate, before the static handler whose header it overrides.
+      immutableAssets(),
       cesium(),
       ...[
         openSkyProxy(),

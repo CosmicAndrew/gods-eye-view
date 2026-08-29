@@ -5,10 +5,13 @@
 # vite.config.js. That is also why devDependencies are installed and kept -
 # vite itself is the runtime here, not just a build tool.
 
-FROM node:24-slim
+# ── build stage ───────────────────────────────────────────────────────────────
+# Split from the runtime stage so puppeteer and sharp - devDependencies used
+# only by the scripts/qa-*.mjs harnesses - never reach the shipped image. On
+# Cloud Run the image is pulled before a cold instance can serve, so its size
+# is startup latency, not just disk.
+FROM node:24-slim AS build
 
-# Chromium is only needed by the scripts/qa-*.mjs harnesses, which never run in
-# the image. Left unset, puppeteer's postinstall downloads ~150MB during build.
 ENV PUPPETEER_SKIP_DOWNLOAD=true \
     NODE_ENV=production \
     CI=true
@@ -40,9 +43,42 @@ ENV GOOGLE_MAPS_API_KEY=$GOOGLE_MAPS_API_KEY \
     CESIUM_ION_TOKEN=$CESIUM_ION_TOKEN
 RUN npm run build
 
-# Bind all interfaces so the platform can route to the container. The port is
-# read from $PORT at runtime (see the `preview` block in vite.config.js).
-ENV HOST=0.0.0.0
+# Drop the QA-only packages by name rather than pruning devDependencies.
+# `npm ci --omit=dev` removes vite too - vite IS the runtime here, it serves the
+# app and hosts every /api route - and reinstalling it under NODE_ENV=production
+# does not bring it back, which fails the container at startup with
+# "Cannot find package 'vite'". puppeteer and sharp are the bulk of the weight
+# and are used only by scripts/qa-*.mjs, which never run in the image.
+RUN rm -rf \
+      node_modules/puppeteer \
+      node_modules/puppeteer-core \
+      node_modules/@puppeteer \
+      node_modules/sharp \
+      node_modules/@img \
+      node_modules/chromium-bidi \
+      node_modules/devtools-protocol \
+ && npm cache clean --force
+
+# ── runtime stage ─────────────────────────────────────────────────────────────
+FROM node:24-slim AS runtime
+
+ENV NODE_ENV=production \
+    HOST=0.0.0.0
+
+WORKDIR /app
+
+# vite.config.js imports from src/, so the source tree ships too - it is small
+# next to node_modules and is what defines the API surface.
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/vite.config.js ./vite.config.js
+COPY --from=build /app/index.html ./index.html
+COPY --from=build /app/src ./src
+COPY --from=build /app/config ./config
+COPY --from=build /app/public ./public
+
+# The port is read from $PORT at runtime (see the `preview` block in vite.config.js).
 EXPOSE 4173
 
 CMD ["npx", "vite", "preview"]

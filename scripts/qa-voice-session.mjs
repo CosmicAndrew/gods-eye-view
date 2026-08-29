@@ -39,6 +39,13 @@ try {
   await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
   await browser.defaultBrowserContext().overridePermissions(new URL(url).origin, ['microphone']);
 
+  // --auth user:pass, for a deployment behind the basic-auth gate.
+  const auth = arg('--auth', null);
+  if (auth) {
+    const [username, ...rest] = auth.split(':');
+    await page.authenticate({ username, password: rest.join(':') });
+  }
+
   const voiceLogs = [];
   page.on('console', (m) => {
     const t = m.text();
