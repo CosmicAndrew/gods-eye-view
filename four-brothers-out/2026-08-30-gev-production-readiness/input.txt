@@ -1,0 +1,2 @@
+Production-readiness setup pass for gods-eye-view, deployed to Google Cloud Run
+behind HTTP Basic auth. Review the branch diff for production defects.

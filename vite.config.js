@@ -46,6 +46,8 @@ import { defineConfig, loadEnv } from 'vite';
 import cesium from 'vite-plugin-cesium';
 import { basicAuthGate } from './src/server/basicAuthGate.js';
 import { immutableAssets } from './src/server/immutableAssets.js';
+import { installProcessGuards } from './src/server/processGuards.js';
+import { clientKeyFrom } from './src/server/clientKey.js';
 import { normalizeRadioCountryInput } from './src/data/radioCountry.js';
 import {
   normalizeRegionalArticles,
@@ -482,13 +484,18 @@ function enforceOptInRateLimit(limiter, req, res) {
 }
 
 /**
- * Client key for rate limiting. Uses the real socket peer address only — we do
- * NOT trust X-Forwarded-For (client-controlled; a rotating value would mint fresh
- * quota and grow the limiter map). This is a localhost dev proxy, so the socket
- * address is the real client.
+ * Client key for rate limiting.
+ *
+ * The socket peer only, unless GEV_TRUSTED_PROXY_HOPS says a known proxy sits
+ * in front. X-Forwarded-For stays untrusted by default for the original reason
+ * — a client can rotate it to mint fresh quota — and the opt-in path reads the
+ * chain from the RIGHT, where only a trusted proxy can append. Set it to 1 on
+ * Cloud Run: without it every caller is the same Google front-end address, so
+ * the limiters collapse into one bucket and a single abuser drains the shared
+ * OpenAI and Google budget.
  */
 function clientKey(req) {
-  return String(req.socket?.remoteAddress || 'local');
+  return clientKeyFrom(req, process.env.GEV_TRUSTED_PROXY_HOPS);
 }
 
 /** Server-side timeout ceiling (seconds) we allow inside an Overpass QL query. */
@@ -7348,6 +7355,12 @@ function alsoServePreview(plugin) {
  * API keys to the client as import.meta.env defines.
  */
 export default defineConfig(({ mode }) => {
+  // One process serves 19 proxy routes, and Node ends the process on an
+  // unhandled rejection - so without this a single bad upstream response is
+  // indistinguishable from an outage. Also drains on SIGTERM, which Cloud Run
+  // sends before every scale-down and deploy.
+  installProcessGuards({ onShutdown: () => disposeAisStream() });
+
   // Load only this checkout's dotenv files. Shell/Keychain values still win,
   // and no sibling workspace is consulted implicitly.
   const loaded = loadEnv(mode, __dirname, '');
@@ -7363,6 +7376,18 @@ export default defineConfig(({ mode }) => {
       basicAuthGate({ user: env.GEV_AUTH_USER, password: env.GEV_AUTH_PASSWORD }),
       // After the gate, before the static handler whose header it overrides.
       immutableAssets(),
+      // Node closes idle keep-alive sockets after 5s; Cloud Run's load balancer
+      // holds them far longer and reuses one it believes is open, which surfaces
+      // as intermittent 502s under no particular load. The server must outlive
+      // the balancer's idle window, and headersTimeout must exceed keepAlive.
+      {
+        name: 'keepalive-timeouts',
+        configurePreviewServer({ httpServer }) {
+          if (!httpServer) return;
+          httpServer.keepAliveTimeout = 620_000;
+          httpServer.headersTimeout = 630_000;
+        },
+      },
       cesium(),
       ...[
         openSkyProxy(),

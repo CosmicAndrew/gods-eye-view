@@ -1,0 +1,1676 @@
+diff --git a/.dockerignore b/.dockerignore
+new file mode 100644
+index 0000000..b1a932b
+--- /dev/null
++++ b/.dockerignore
+@@ -0,0 +1,8 @@
++node_modules
++dist
++.git
++.env
++.gev-cache
++qa-shots
++docs/media
++*.log
+diff --git a/.gcloudignore b/.gcloudignore
+new file mode 100644
+index 0000000..127582e
+--- /dev/null
++++ b/.gcloudignore
+@@ -0,0 +1,11 @@
++# Cloud Build uploads this directory before building. Without this file gcloud
++# falls back to .gitignore, which keeps docs/media - 68MB of demo GIFs that the
++# image never uses and that dominate the upload on a slow link.
++.git
++node_modules
++dist
++.env
++.gev-cache
++qa-shots
++docs/media
++*.log
+diff --git a/Dockerfile b/Dockerfile
+new file mode 100644
+index 0000000..c9dcad1
+--- /dev/null
++++ b/Dockerfile
+@@ -0,0 +1,92 @@
++# God's Eye View - container image for a private, password-gated deployment.
++#
++# The app is served by `vite preview`, not a separate server: its entire API
++# surface (19 /api/* routes) is Vite plugin middleware defined in
++# vite.config.js. That is also why devDependencies are installed and kept -
++# vite itself is the runtime here, not just a build tool.
++
++# ── build stage ───────────────────────────────────────────────────────────────
++# Split from the runtime stage so puppeteer and sharp - devDependencies used
++# only by the scripts/qa-*.mjs harnesses - never reach the shipped image. On
++# Cloud Run the image is pulled before a cold instance can serve, so its size
++# is startup latency, not just disk.
++FROM node:24-slim AS build
++
++ENV PUPPETEER_SKIP_DOWNLOAD=true \
++    NODE_ENV=production \
++    CI=true
++
++WORKDIR /app
++
++COPY package.json package-lock.json ./
++# `--include=dev` because NODE_ENV=production would otherwise omit vite, which
++# is the runtime here. The retry settings are not boilerplate: this install
++# pulls ~270 packages including Cesium, and a plain `npm ci` died on ECONNRESET
++# partway through on a flaky connection.
++RUN npm config set fetch-retries 5 \
++ && npm config set fetch-retry-mintimeout 20000 \
++ && npm config set fetch-retry-maxtimeout 120000 \
++ && npm config set fetch-timeout 600000 \
++ && npm ci --include=dev
++
++COPY . .
++
++# GOOGLE_MAPS_API_KEY is injected into the browser bundle by vite's `define`,
++# so it has to exist at BUILD time - supplying it only at runtime yields an
++# image whose globe silently fails to authenticate. On Railway, set it as a
++# service variable and it is passed through as a build arg.
++# Note this bakes the key into an image layer: keep the image private, and
++# restrict the key to the deploy domain + the four APIs it needs.
++ARG GOOGLE_MAPS_API_KEY
++ARG CESIUM_ION_TOKEN
++ENV GOOGLE_MAPS_API_KEY=$GOOGLE_MAPS_API_KEY \
++    CESIUM_ION_TOKEN=$CESIUM_ION_TOKEN
++RUN npm run build
++
++# Drop the QA-only packages by name rather than pruning devDependencies.
++# `npm ci --omit=dev` removes vite too - vite IS the runtime here, it serves the
++# app and hosts every /api route - and reinstalling it under NODE_ENV=production
++# does not bring it back, which fails the container at startup with
++# "Cannot find package 'vite'". puppeteer and sharp are the bulk of the weight
++# and are used only by scripts/qa-*.mjs, which never run in the image.
++RUN rm -rf \
++      node_modules/puppeteer \
++      node_modules/puppeteer-core \
++      node_modules/@puppeteer \
++      node_modules/sharp \
++      node_modules/@img \
++      node_modules/chromium-bidi \
++      node_modules/devtools-protocol \
++ && npm cache clean --force
++
++# ── runtime stage ─────────────────────────────────────────────────────────────
++FROM node:24-slim AS runtime
++
++ENV NODE_ENV=production \
++    HOST=0.0.0.0
++
++WORKDIR /app
++
++# vite.config.js imports from src/, so the source tree ships too - it is small
++# next to node_modules and is what defines the API surface.
++COPY --from=build /app/node_modules ./node_modules
++COPY --from=build /app/dist ./dist
++COPY --from=build /app/package.json ./package.json
++COPY --from=build /app/vite.config.js ./vite.config.js
++COPY --from=build /app/index.html ./index.html
++COPY --from=build /app/src ./src
++COPY --from=build /app/config ./config
++COPY --from=build /app/public ./public
++
++# Seed the proxy's disk cache with orbital elements. celestrak.org is globally
++# unreachable and has no working mirror, so a fresh container answered every
++# /api/celestrak/* with 502 and the satellite layer rendered nothing - the
++# proxy serves stale on upstream failure, but had nothing stale to serve. The
++# moment celestrak answers again these are overwritten with fresh data. See
++# seed-cache/README.md.
++COPY --from=build /app/seed-cache/celestrak-*.json ./.gev-cache/
++
++# The port is read from $PORT at runtime (see the `preview` block in vite.config.js).
++EXPOSE 4173
++
++CMD ["npx", "vite", "preview"]
+diff --git a/cloudbuild.yaml b/cloudbuild.yaml
+new file mode 100644
+index 0000000..4890fe6
+--- /dev/null
++++ b/cloudbuild.yaml
+@@ -0,0 +1,30 @@
++# Build the image on Cloud Build rather than pushing one from a workstation:
++# the image is ~900MB and a local `docker push` fails on a slow uplink
++# (TLS handshake timeout). This uploads ~20MB of source instead.
++#
++# GOOGLE_MAPS_API_KEY is a BUILD argument, not a runtime variable: vite's
++# `define` bakes it into the browser bundle, so supplying it at runtime only
++# produces an image whose globe cannot authenticate.
++steps:
++  - name: gcr.io/cloud-builders/docker
++    args:
++      - build
++      - --build-arg
++      - GOOGLE_MAPS_API_KEY=${_GOOGLE_MAPS_API_KEY}
++      - --build-arg
++      - CESIUM_ION_TOKEN=${_CESIUM_ION_TOKEN}
++      - -t
++      - ${_IMAGE}
++      - .
++images:
++  - ${_IMAGE}
++substitutions:
++  _IMAGE: us-central1-docker.pkg.dev/project-494b9eee-ced6-4525-aa8/gev/gods-eye-view:v1
++  _GOOGLE_MAPS_API_KEY: ''
++  _CESIUM_ION_TOKEN: ''
++options:
++  # No machineType override: a new account has no quota for the larger types
++  # ("due to quota restrictions, Cloud Build cannot run builds of this machine
++  # type in this region"). The default is slower but always available.
++  logging: CLOUD_LOGGING_ONLY
++timeout: 1800s
+diff --git a/docs/DEPLOY-PRIVATE.md b/docs/DEPLOY-PRIVATE.md
+new file mode 100644
+index 0000000..100c8d6
+--- /dev/null
++++ b/docs/DEPLOY-PRIVATE.md
+@@ -0,0 +1,88 @@
++# Private deployment (password-gated)
++
++How to run this on a host you can reach from anywhere, without handing your
++metered API keys to the internet.
++
++## Why a Node host, and not static hosting
++
++The app has no separate backend: all 19 `/api/*` routes are Vite plugin
++middleware in `vite.config.js`. So the deployment runs `vite preview`, and a
++static host (here.now, Netlify drop, S3, GitHub Pages) cannot serve it. On
++static hosting you would get the globe and the bundled datasets, and lose every
++live layer plus voice — `/api/realtime/token` mints the OpenAI session with the
++server's own key, and there is no server to mint it.
++
++## Two facts that decide the configuration
++
++**The Google key is a build-time input.** `vite.config.js` injects it into the
++browser bundle through `define`, so it must be present when `npm run build`
++runs. Supplying it only at runtime produces an image whose globe fails to
++authenticate, with no error beyond a 400 from `tile.googleapis.com`. The
++`Dockerfile` takes it as an `ARG` for exactly this reason.
++
++**The OpenAI key is runtime-only and must stay that way.** It never enters the
++bundle. Verify after any change:
++
++```bash
++grep -rl "$OPENAI_API_KEY" dist/   # must print nothing
++```
++
++## Deploy to Railway
++
++```bash
++npm i -g @railway/cli
++railway login          # opens a browser
++railway init           # or: railway link, for an existing project
++```
++
++Set the variables (Railway dashboard → Variables, or `railway variables --set`):
++
++| Variable | Required | Notes |
++|---|---|---|
++| `GEV_AUTH_USER` | **yes** | Any username. Without both auth vars the gate is uninstalled and the deploy is public. |
++| `GEV_AUTH_PASSWORD` | **yes** | Use a long random value. |
++| `GOOGLE_MAPS_API_KEY` | **yes** | Build **and** runtime. Globe, geocoding, places, street view. |
++| `OPENAI_API_KEY` | for voice | Runtime only. Never prefix with `VITE_`. |
++| `OPENSKY_AUTH_MODE` | recommended | `anon` — aircraft work keyless. |
++| `GEV_RATELIMIT_OPENAI_PER_MIN` | recommended | e.g. `30`. Per-IP, process-local; not a billing cap. |
++| `GEV_RATELIMIT_GOOGLE_PER_MIN` | recommended | e.g. `60`. |
++| `GEV_ALLOWED_HOSTS` | custom domain only | Comma-separated. `RAILWAY_PUBLIC_DOMAIN` is picked up automatically. |
++| `CESIUM_ION_TOKEN`, `FIRMS_MAP_KEY`, `AISSTREAM_API_KEY`, `TOMTOM_API_KEY` | optional | Free tiers. Layers degrade gracefully without them. |
++
++Then:
++
++```bash
++railway up
++```
++
++`HOST=0.0.0.0` is set in the image; `PORT` comes from the platform and is read
++by the `preview` block in `vite.config.js`.
++
++> **No healthcheck path is configured on purpose.** With the auth gate armed,
++> every path including `/` answers `401`, so a healthcheck would mark a healthy
++> deploy as failed. Railway falls back to port detection.
++
++## Verify the deployment
++
++```bash
++curl -s -o /dev/null -w '%{http_code}\n' https://<domain>/                    # 401
++curl -s -o /dev/null -w '%{http_code}\n' -u user:pass https://<domain>/       # 200
++curl -s -o /dev/null -w '%{http_code}\n' -u user:pass https://<domain>/api/realtime/token  # 200
++```
++
++The first must be `401`. If it is `200`, the gate is not armed — the browser
++bundle, and the Google key inside it, are public. Fix before going further.
++
++## Cost exposure
++
++Anyone holding the password can spend real money: OpenAI voice sessions (the app
++caps each at $5, warns at $2) and Google tile requests. The password is the
++control that matters; the rate limits only blunt a runaway loop.
++
++Set provider-side budgets too, because neither the app nor the rate limiter can
++stop spend: Google Cloud → Billing → Budgets & alerts, plus per-API quota caps
++under APIs & Services → Quotas, and OpenAI → Settings → Limits.
++
++**The Google key is baked into an image layer** by the build. Keep the image
++registry private, restrict the key to the four APIs it needs, and prefer a key
++dedicated to this deployment so it can be rotated without touching anything else.
+diff --git a/railway.json b/railway.json
+new file mode 100644
+index 0000000..3344c7d
+--- /dev/null
++++ b/railway.json
+@@ -0,0 +1,11 @@
++{
++  "$schema": "https://railway.app/railway.schema.json",
++  "build": {
++    "builder": "DOCKERFILE",
++    "dockerfilePath": "./Dockerfile"
++  },
++  "deploy": {
++    "restartPolicyType": "on-failure",
++    "numReplicas": 1
++  }
++}
+diff --git a/scripts/deploy-cloudrun.ps1 b/scripts/deploy-cloudrun.ps1
+new file mode 100644
+index 0000000..e1bc69b
+--- /dev/null
++++ b/scripts/deploy-cloudrun.ps1
+@@ -0,0 +1,86 @@
++<#
++.SYNOPSIS
++  Deploy God's Eye View to Google Cloud Run, password-gated.
++
++.DESCRIPTION
++  Cloud Run rather than static hosting because the app's whole API surface is
++  Vite plugin middleware; rather than Railway because that trial has expired.
++
++  Deploys a prebuilt image: GOOGLE_MAPS_API_KEY is baked into the browser
++  bundle at build time, so the image is built locally (or by CI) with that as a
++  build ARG and pushed, instead of built from source here.
++
++.EXAMPLE
++  .\scripts\deploy-cloudrun.ps1
++#>
++[CmdletBinding()]
++param(
++  [string]$Project = 'project-494b9eee-ced6-4525-aa8',
++  [string]$Region  = 'us-central1',
++  [string]$Service = 'gods-eye-view',
++  [string]$Image   = 'us-central1-docker.pkg.dev/project-494b9eee-ced6-4525-aa8/gev/gods-eye-view:v1'
++)
++
++$ErrorActionPreference = 'Stop'
++$repo = Split-Path -Parent $PSScriptRoot
++Set-Location $repo
++
++# Cloud Run supplies PORT and routes to it; .env pins HOST/PORT to localhost,
++# which would leave the container unreachable.
++$skip = @('HOST', 'PORT')
++$vars = @{}
++foreach ($line in Get-Content (Join-Path $repo '.env')) {
++  if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
++  $i = $line.IndexOf('=')
++  $name = $line.Substring(0, $i).Trim()
++  $value = $line.Substring($i + 1).Trim()
++  if (-not $name -or -not $value -or $skip -contains $name -or $value -like 'PASTE_YOUR*') { continue }
++  $vars[$name] = $value
++}
++
++foreach ($required in @('GEV_AUTH_USER', 'GEV_AUTH_PASSWORD', 'GOOGLE_MAPS_API_KEY')) {
++  if (-not $vars[$required]) { throw "$required missing from .env - without the auth pair the deploy is PUBLIC." }
++}
++
++# Any Cloud Run URL, so the service works before its hostname is known. Vite
++# rejects unknown Host headers, which presents as a blank page on a healthy server.
++$vars['GEV_ALLOWED_HOSTS'] = '.run.app'
++
++# `--env-vars-file` is not accepted by this gcloud's `run deploy`, so use the
++# ^DELIM^ form: values here contain commas, which the default separator splits.
++if ($vars.Values | Where-Object { $_ -like '*##*' }) { throw 'A value contains the ## delimiter.' }
++$envArg = '^##^' + (($vars.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join '##')
++
++Write-Host "Deploying $Service to Cloud Run ($Region)..." -ForegroundColor Cyan
++gcloud run deploy $Service `
++  --image $Image `
++  --project $Project `
++  --region $Region `
++  --platform managed `
++  --allow-unauthenticated `
++  --memory 1Gi `
++  --cpu 1 `
++  --min-instances 0 `
++  --max-instances 3 `
++  --timeout 300 `
++  --set-env-vars $envArg `
++  --quiet
++if ($LASTEXITCODE -ne 0) { throw "gcloud run deploy failed ($LASTEXITCODE)" }
++
++$url = gcloud run services describe $Service --project $Project --region $Region --format='value(status.url)' 2>$null
++if (-not $url) { throw 'Deployed but could not read the service URL.' }
++
++# --allow-unauthenticated is deliberate: the app's own gate is the control, so
++# this must answer 401. A 200 means the gate never armed and the bundle -
++# which carries the Google key - is being served to anyone with the URL.
++$code = try { (Invoke-WebRequest $url -TimeoutSec 30 -SkipHttpErrorCheck).StatusCode } catch { 0 }
++
++Write-Host ""
++Write-Host "URL: $url" -ForegroundColor Green
++if ($code -eq 401) {
++  Write-Host "GATE CLOSED (401). Sign in as $($vars['GEV_AUTH_USER']) / $($vars['GEV_AUTH_PASSWORD'])" -ForegroundColor Green
++} elseif ($code -eq 200) {
++  Write-Warning 'PUBLIC (200) - the auth gate did NOT arm. Do not share this URL; check GEV_AUTH_* on the service.'
++} else {
++  Write-Warning "Unexpected status $code - check: gcloud run services logs read $Service --region $Region"
++}
+diff --git a/scripts/deploy-railway.ps1 b/scripts/deploy-railway.ps1
+new file mode 100644
+index 0000000..58ab604
+--- /dev/null
++++ b/scripts/deploy-railway.ps1
+@@ -0,0 +1,81 @@
++<#
++.SYNOPSIS
++  Deploy God's Eye View to Railway, password-gated, in one command.
++
++.DESCRIPTION
++  Run `railway login` once first (browser OAuth; cannot be automated). Then this
++  script links a project, pushes every variable from .env, deploys, and verifies
++  the gate is closed.
++
++.EXAMPLE
++  railway login
++  .\scripts\deploy-railway.ps1
++#>
++[CmdletBinding()]
++param([string]$ProjectName = 'gods-eye-view')
++
++$ErrorActionPreference = 'Stop'
++$repo = Split-Path -Parent $PSScriptRoot
++Set-Location $repo
++
++if (-not (Get-Command railway -ErrorAction SilentlyContinue)) { throw 'Railway CLI missing: npm i -g @railway/cli' }
++railway whoami *> $null
++if ($LASTEXITCODE -ne 0) { throw 'Not logged in. Run: railway login' }
++
++# Parse .env, ignoring comments and blank lines.
++$envVars = @{}
++foreach ($line in Get-Content (Join-Path $repo '.env')) {
++  if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
++  $name, $value = $line -split '=', 2
++  $name = $name.Trim(); $value = $value.Trim()
++  if ($name -and $value) { $envVars[$name] = $value }
++}
++
++foreach ($required in @('GOOGLE_MAPS_API_KEY', 'GEV_AUTH_USER', 'GEV_AUTH_PASSWORD')) {
++  if (-not $envVars[$required] -or $envVars[$required] -like 'PASTE_YOUR*') {
++    throw "$required is missing from .env. Without the auth pair the deploy is PUBLIC."
++  }
++}
++
++# HOST/PORT come from the platform, not the local file: .env pins them to
++# localhost:4173, which would make the container unreachable.
++'HOST', 'PORT' | ForEach-Object { $envVars.Remove($_) }
++
++if (-not (Test-Path (Join-Path $repo '.railway'))) {
++  Write-Host "Creating Railway project '$ProjectName'..." -ForegroundColor Cyan
++  railway init --name $ProjectName
++  if ($LASTEXITCODE -ne 0) { throw 'railway init failed' }
++}
++
++Write-Host "Pushing $($envVars.Count) variables..." -ForegroundColor Cyan
++$pairs = $envVars.GetEnumerator() | ForEach-Object { '--set'; "$($_.Key)=$($_.Value)" }
++railway variables @pairs | Out-Null
++if ($LASTEXITCODE -ne 0) { throw 'Failed to set variables' }
++
++Write-Host 'Deploying (build runs on Railway; first one takes a few minutes)...' -ForegroundColor Cyan
++railway up --detach
++if ($LASTEXITCODE -ne 0) { throw 'railway up failed' }
++
++$domain = (railway domain 2>&1 | Select-String -Pattern '[a-z0-9.-]+\.(up\.railway\.app|railway\.app)' |
++  ForEach-Object { $_.Matches[0].Value } | Select-Object -First 1)
++if (-not $domain) { Write-Warning 'No domain yet. Run `railway domain` to generate one, then re-run the checks below.'; return }
++
++$url = "https://$domain"
++Write-Host "`nDeployed: $url" -ForegroundColor Green
++Write-Host 'Waiting for the first response...' -ForegroundColor DarkGray
++
++$deadline = (Get-Date).AddMinutes(10)
++do {
++  Start-Sleep -Seconds 10
++  $code = try { (Invoke-WebRequest $url -TimeoutSec 10 -SkipHttpErrorCheck).StatusCode } catch { 0 }
++} until ($code -ne 0 -or (Get-Date) -gt $deadline)
++
++# A 200 here means the gate never armed and the bundle - which carries the
++# Google key - is being served to anyone with the URL.
++if ($code -eq 401) {
++  Write-Host "GATE CLOSED (401). Sign in as $($envVars['GEV_AUTH_USER']) / $($envVars['GEV_AUTH_PASSWORD'])" -ForegroundColor Green
++} elseif ($code -eq 200) {
++  Write-Warning "PUBLIC (200) - the auth gate did NOT arm. Check GEV_AUTH_* in `railway variables` before sharing this URL."
++} else {
++  Write-Warning "Unexpected status $code - check `railway logs`."
++}
+diff --git a/scripts/qa-boot-smoke.mjs b/scripts/qa-boot-smoke.mjs
+new file mode 100644
+index 0000000..f057395
+--- /dev/null
++++ b/scripts/qa-boot-smoke.mjs
+@@ -0,0 +1,111 @@
++#!/usr/bin/env node
++/**
++ * qa-boot-smoke — does the app actually boot on this machine?
++ *
++ * Loads the running server, waits for the Cesium viewer to exist, and reports
++ * console errors, failed requests, and which data layers registered. Works
++ * against the dev server or a production preview build; unlike the deeper
++ * harnesses it needs no `import.meta.env.DEV` QA hooks, so it is the one check
++ * that is valid against `npm run preview`.
++ *
++ * Usage: node scripts/qa-boot-smoke.mjs [--url http://localhost:4173] [--headful] [--settle 20000]
++ */
++import { existsSync } from 'node:fs';
++import puppeteer from 'puppeteer';
++
++const argv = process.argv;
++const arg = (flag, fallback) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : fallback);
++const url = arg('--url', 'http://localhost:4173');
++const settleMs = Number(arg('--settle', '20000'));
++const headful = argv.includes('--headful');
++
++/** Prefer an installed Chrome over puppeteer's download, which this machine lacks. */
++const chromePath = [
++  process.env.PUPPETEER_EXECUTABLE_PATH,
++  'C:/Program Files/Google/Chrome/Application/chrome.exe',
++  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
++].find((p) => p && existsSync(p));
++
++// On a hybrid-graphics laptop Chrome picks the integrated GPU by default.
++const gpuArgs = argv.includes('--force-gpu') ? ['--force-high-performance-gpu'] : [];
++
++const browser = await puppeteer.launch({
++  headless: !headful,
++  ...(chromePath ? { executablePath: chromePath } : {}),
++  // The frame-rate probe blocks its execution context for a full sampling
++  // window, which outruns the 30s default and aborts the run.
++  protocolTimeout: 180_000,
++  args: headful
++    ? gpuArgs
++    : ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', ...gpuArgs],
++});
++
++try {
++  const page = await browser.newPage();
++  await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
++
++  const auth = arg('--auth', null);
++  if (auth) {
++    const [username, ...rest] = auth.split(':');
++    await page.authenticate({ username, password: rest.join(':') });
++  }
++
++  const consoleErrors = [];
++  const pageErrors = [];
++  const failedRequests = [];
++  page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 300)); });
++  page.on('pageerror', (e) => pageErrors.push(String(e?.message || e).slice(0, 300)));
++  page.on('requestfailed', (r) => failedRequests.push(`${r.failure()?.errorText} ${r.url().slice(0, 120)}`));
++  const badResponses = [];
++  page.on('response', (r) => {
++    if (r.status() >= 400) badResponses.push(`${r.status()} ${r.url().replace(/key=[^&]+/, 'key=REDACTED').slice(0, 140)}`);
++  });
++
++  const started = Date.now();
++  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
++
++  const viewerReady = await page
++    .waitForFunction(() => Boolean(window.viewer?.scene) || Boolean(document.querySelector('.cesium-widget canvas')), { timeout: 60000 })
++    .then(() => true)
++    .catch(() => false);
++  const readyMs = Date.now() - started;
++
++  await new Promise((r) => setTimeout(r, settleMs));
++
++  const state = await page.evaluate(() => {
++    const canvas = document.querySelector('canvas');
++    const gl = canvas?.getContext('webgl2') || canvas?.getContext('webgl');
++    const dbg = gl?.getExtension('WEBGL_debug_renderer_info');
++    return {
++      title: document.title,
++      canvas: canvas ? { w: canvas.width, h: canvas.height } : null,
++      renderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : (gl ? 'masked' : 'no-webgl'),
++      layerToggles: document.querySelectorAll('#data-toggles [data-layer-id], #data-toggles button, #data-toggles input').length,
++      voiceControl: Boolean(document.getElementById('gev-voice-control')),
++      voiceButton: Boolean(document.getElementById('gev-voice-button')),
++      voiceStatus: document.getElementById('gev-voice-status')?.textContent?.trim() ?? null,
++      primitives: window.viewer?.scene?.primitives?.length ?? null,
++      entities: window.viewer?.entities?.values?.length ?? null,
++    };
++  });
++
++  // Frame rate over a 5s window at rest.
++  const fps = await page.evaluate(() => new Promise((resolve) => {
++    let frames = 0;
++    const t0 = performance.now();
++    const tick = () => { frames++; if (performance.now() - t0 < 5000) requestAnimationFrame(tick); else resolve(+(frames / ((performance.now() - t0) / 1000)).toFixed(1)); };
++    requestAnimationFrame(tick);
++  }));
++
++  console.log(JSON.stringify({
++    url, viewerReady, readyMs, fps, ...state,
++    consoleErrors: [...new Set(consoleErrors)].slice(0, 15),
++    pageErrors: [...new Set(pageErrors)].slice(0, 10),
++    failedRequests: [...new Set(failedRequests)].slice(0, 15),
++    badResponses: [...new Set(badResponses)].slice(0, 20),
++  }, null, 2));
++
++  process.exitCode = viewerReady && pageErrors.length === 0 ? 0 : 1;
++} finally {
++  await browser.close();
++}
+diff --git a/scripts/qa-gpu-matrix.mjs b/scripts/qa-gpu-matrix.mjs
+new file mode 100644
+index 0000000..260b1c4
+--- /dev/null
++++ b/scripts/qa-gpu-matrix.mjs
+@@ -0,0 +1,81 @@
++#!/usr/bin/env node
++/**
++ * qa-gpu-matrix — find a Chrome GPU configuration that starts reliably.
++ *
++ * On a hybrid-graphics machine whose discrete driver has been restarted but
++ * not cleanly re-initialised, Chrome's GPU process hangs on some launches and
++ * works on others. A single run cannot tell those apart, so this repeats each
++ * flag combination and reports adapter, frame rate, and hang rate.
++ *
++ * Usage: node scripts/qa-gpu-matrix.mjs [--url ...] [--auth user:pass] [--runs 3]
++ */
++import { existsSync } from 'node:fs';
++import puppeteer from 'puppeteer';
++
++const argv = process.argv;
++const arg = (f, d) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : d);
++const url = arg('--url', 'http://localhost:4173');
++const auth = arg('--auth', null);
++const runs = Number(arg('--runs', '3'));
++
++const chromePath = [
++  process.env.PUPPETEER_EXECUTABLE_PATH,
++  'C:/Program Files/Google/Chrome/Application/chrome.exe',
++].find((p) => p && existsSync(p));
++
++const CONFIGS = [
++  { name: 'd3d11 (default)', args: ['--force-high-performance-gpu'] },
++  { name: 'd3d11 + ignore-blocklist', args: ['--force-high-performance-gpu', '--ignore-gpu-blocklist', '--enable-gpu-rasterization'] },
++  { name: 'angle=d3d11on12', args: ['--force-high-performance-gpu', '--use-angle=d3d11on12'] },
++  { name: 'angle=vulkan', args: ['--force-high-performance-gpu', '--use-angle=vulkan'] },
++  { name: 'angle=gl', args: ['--force-high-performance-gpu', '--use-angle=gl'] },
++];
++
++async function attempt(extraArgs) {
++  const browser = await puppeteer.launch({
++    headless: false,
++    ...(chromePath ? { executablePath: chromePath } : {}),
++    protocolTimeout: 45_000,
++    args: [...extraArgs, '--window-size=1440,900'],
++  });
++  try {
++    const page = await browser.newPage();
++    await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
++    if (auth) {
++      const [username, ...rest] = auth.split(':');
++      await page.authenticate({ username, password: rest.join(':') });
++    }
++    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
++    await page.waitForFunction(() => Boolean(document.querySelector('.cesium-widget canvas')), { timeout: 60000 });
++    await new Promise((r) => setTimeout(r, 9000));
++
++    const renderer = await page.evaluate(() => {
++      const c = document.querySelector('canvas');
++      const gl = c?.getContext('webgl2') || c?.getContext('webgl');
++      const d = gl?.getExtension('WEBGL_debug_renderer_info');
++      return d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : 'unknown';
++    });
++    const fps = await page.evaluate(() => new Promise((resolve) => {
++      let f = 0; const t0 = performance.now();
++      const tick = () => { f++; if (performance.now() - t0 < 4000) requestAnimationFrame(tick); else resolve(+(f / ((performance.now() - t0) / 1000)).toFixed(1)); };
++      requestAnimationFrame(tick);
++    }));
++    return { ok: true, gpu: /NVIDIA/i.test(renderer) ? 'NVIDIA' : /Intel/i.test(renderer) ? 'Intel' : renderer.slice(0, 30), fps };
++  } catch (e) {
++    return { ok: false, reason: e.message.slice(0, 40) };
++  } finally {
++    await browser.close().catch(() => {});
++  }
++}
++
++for (const config of CONFIGS) {
++  const results = [];
++  for (let i = 0; i < runs; i++) results.push(await attempt(config.args));
++  const good = results.filter((r) => r.ok);
++  const nvidia = good.filter((r) => r.gpu === 'NVIDIA');
++  const avg = nvidia.length ? (nvidia.reduce((s, r) => s + r.fps, 0) / nvidia.length).toFixed(1) : '-';
++  console.log(
++    `${config.name.padEnd(26)} ok=${good.length}/${runs}  nvidia=${nvidia.length}/${runs}  avgFps=${avg}`
++    + (good.length < runs ? `  [${results.filter((r) => !r.ok).length} hung]` : ''),
++  );
++}
+diff --git a/scripts/qa-layer-errors.mjs b/scripts/qa-layer-errors.mjs
+new file mode 100644
+index 0000000..08479c6
+--- /dev/null
++++ b/scripts/qa-layer-errors.mjs
+@@ -0,0 +1,94 @@
++#!/usr/bin/env node
++/**
++ * qa-layer-errors — turn on every layer, one at a time, and report what breaks.
++ *
++ * A default page load exercises almost nothing: the boot smoke test comes back
++ * clean while individual layers still fail on activation. This attributes each
++ * console error, failed request and >=400 response to the layer that was being
++ * switched on when it happened, so "there are loading errors" becomes a list.
++ *
++ * Usage: node scripts/qa-layer-errors.mjs [--url ...] [--auth user:pass] [--dwell 6000]
++ */
++import { existsSync } from 'node:fs';
++import puppeteer from 'puppeteer';
++
++const argv = process.argv;
++const arg = (f, d) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : d);
++const url = arg('--url', 'http://localhost:4173');
++const auth = arg('--auth', null);
++const dwell = Number(arg('--dwell', '6000'));
++
++const chromePath = [
++  process.env.PUPPETEER_EXECUTABLE_PATH,
++  'C:/Program Files/Google/Chrome/Application/chrome.exe',
++].find((p) => p && existsSync(p));
++
++const browser = await puppeteer.launch({
++  headless: false,
++  ...(chromePath ? { executablePath: chromePath } : {}),
++  args: ['--force-high-performance-gpu', '--window-size=1440,900'],
++});
++
++try {
++  const page = await browser.newPage();
++  await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
++  if (auth) {
++    const [username, ...rest] = auth.split(':');
++    await page.authenticate({ username, password: rest.join(':') });
++  }
++
++  let bucket = [];
++  page.on('console', (m) => { if (m.type() === 'error') bucket.push(`console: ${m.text().slice(0, 220)}`); });
++  page.on('pageerror', (e) => bucket.push(`pageerror: ${String(e?.message || e).slice(0, 220)}`));
++  page.on('requestfailed', (r) => {
++    const t = r.failure()?.errorText || '';
++    // Cesium cancels in-flight tile requests on every camera move; that is normal.
++    if (t.includes('ERR_ABORTED')) return;
++    bucket.push(`requestfailed: ${t} ${r.url().slice(0, 130)}`);
++  });
++  page.on('response', (r) => {
++    if (r.status() >= 400) bucket.push(`http ${r.status()}: ${r.url().replace(/key=[^&]+/, 'key=REDACTED').slice(0, 150)}`);
++  });
++
++  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
++  await page.waitForFunction(() => Boolean(document.querySelector('.cesium-widget canvas')), { timeout: 90000 });
++  await new Promise((r) => setTimeout(r, 8000)); // let the intro flight settle
++
++  const layers = await page.evaluate(() =>
++    [...document.querySelectorAll('#data-toggles [data-layer-id]')].map((el, i) => ({
++      index: i,
++      id: el.getAttribute('data-layer-id'),
++      label: (el.textContent || '').trim().slice(0, 40),
++    })));
++
++  if (!layers.length) {
++    console.log('no [data-layer-id] toggles found; DOM sample:');
++    console.log(await page.evaluate(() => document.getElementById('data-toggles')?.innerHTML?.slice(0, 600)));
++    process.exitCode = 1;
++  } else {
++    console.log(`checking ${layers.length} layers\n`);
++    const report = [];
++    for (const layer of layers) {
++      bucket = [];
++      await page.evaluate((id) => {
++        const el = document.querySelector(`#data-toggles [data-layer-id="${id}"]`);
++        (el.querySelector('input,button') || el).click();
++      }, layer.id);
++      await new Promise((r) => setTimeout(r, dwell));
++      const problems = [...new Set(bucket)];
++      report.push({ layer: layer.id, problems });
++      console.log(`${problems.length ? 'FAIL' : 'ok  '}  ${layer.id}${problems.length ? `\n${problems.map((p) => `        ${p}`).join('\n')}` : ''}`);
++      // Switch it back off so layers are measured independently.
++      await page.evaluate((id) => {
++        const el = document.querySelector(`#data-toggles [data-layer-id="${id}"]`);
++        (el.querySelector('input,button') || el).click();
++      }, layer.id).catch(() => {});
++      await new Promise((r) => setTimeout(r, 800));
++    }
++    const failed = report.filter((r) => r.problems.length);
++    console.log(`\n${failed.length} of ${report.length} layers reported problems`);
++    process.exitCode = failed.length ? 1 : 0;
++  }
++} finally {
++  await browser.close();
++}
+diff --git a/scripts/qa-mic-probe.mjs b/scripts/qa-mic-probe.mjs
+new file mode 100644
+index 0000000..81d22f0
+--- /dev/null
++++ b/scripts/qa-mic-probe.mjs
+@@ -0,0 +1,86 @@
++#!/usr/bin/env node
++/**
++ * qa-mic-probe — is the real microphone actually producing audio?
++ *
++ * The voice harnesses use --use-fake-device-for-media-stream, which bypasses
++ * the OS entirely: they prove the Realtime session works while saying nothing
++ * about whether this machine's microphone is delivering samples. This opens
++ * each audio input for real and measures peak deviation from silence, so a
++ * dead mic is distinguishable from a broken app.
++ *
++ * Usage: node scripts/qa-mic-probe.mjs [--url ...] [--auth user:pass] [--seconds 3]
++ */
++import { existsSync } from 'node:fs';
++import puppeteer from 'puppeteer';
++
++const argv = process.argv;
++const arg = (f, d) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : d);
++const url = arg('--url', 'http://localhost:4173');
++const auth = arg('--auth', null);
++const seconds = Number(arg('--seconds', '3'));
++
++const chromePath = [
++  process.env.PUPPETEER_EXECUTABLE_PATH,
++  'C:/Program Files/Google/Chrome/Application/chrome.exe',
++].find((p) => p && existsSync(p));
++
++const browser = await puppeteer.launch({
++  headless: false,
++  ...(chromePath ? { executablePath: chromePath } : {}),
++  args: ['--use-fake-ui-for-media-stream'], // grants Chrome's prompt; OS-level consent is separate
++});
++
++try {
++  const page = await browser.newPage();
++  if (auth) {
++    const [username, ...rest] = auth.split(':');
++    await page.authenticate({ username, password: rest.join(':') });
++  }
++  await browser.defaultBrowserContext().overridePermissions(new URL(url).origin, ['microphone']);
++  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
++
++  const results = await page.evaluate(async (secs) => {
++    const measure = async (deviceId) => {
++      const stream = await navigator.mediaDevices.getUserMedia(
++        deviceId ? { audio: { deviceId: { exact: deviceId } } } : { audio: true },
++      );
++      const track = stream.getAudioTracks()[0];
++      const ctx = new AudioContext();
++      const analyser = ctx.createAnalyser();
++      ctx.createMediaStreamSource(stream).connect(analyser);
++      const buf = new Uint8Array(analyser.fftSize);
++      let peak = 0;
++      const t0 = performance.now();
++      while (performance.now() - t0 < secs * 1000) {
++        analyser.getByteTimeDomainData(buf);
++        for (const v of buf) peak = Math.max(peak, Math.abs(v - 128));
++        await new Promise((r) => setTimeout(r, 50));
++      }
++      const info = { label: track.label, muted: track.muted, state: track.readyState, peak };
++      stream.getTracks().forEach((t) => t.stop());
++      await ctx.close();
++      return info;
++    };
++
++    const out = [];
++    const devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput');
++    for (const device of devices) {
++      try {
++        out.push(await measure(device.deviceId));
++      } catch (e) {
++        out.push({ label: device.label, error: `${e.name}: ${e.message}` });
++      }
++    }
++    return out;
++  }, seconds);
++
++  for (const r of results) {
++    // peak is 0-127 deviation from the 128 silence midpoint; anything under ~2
++    // is indistinguishable from a dead line.
++    const verdict = r.error ? 'ERROR' : r.peak >= 2 ? 'HEARS AUDIO' : 'SILENT';
++    console.log(`${verdict.padEnd(12)} peak=${String(r.peak ?? '-').padStart(4)} muted=${r.muted ?? '-'}  ${r.label || '(no label)'}${r.error ? `  ${r.error}` : ''}`);
++  }
++  process.exitCode = results.some((r) => !r.error && r.peak >= 2) ? 0 : 1;
++} finally {
++  await browser.close();
++}
+diff --git a/scripts/qa-voice-heard.mjs b/scripts/qa-voice-heard.mjs
+new file mode 100644
+index 0000000..c7f484a
+--- /dev/null
++++ b/scripts/qa-voice-heard.mjs
+@@ -0,0 +1,134 @@
++#!/usr/bin/env node
++/**
++ * qa-voice-heard — does OpenAI actually hear us, and does it act?
++ *
++ * qa-voice-session proves the WebRTC session connects. That is not the same as
++ * the model receiving audio: a session can sit in LISTENING forever while the
++ * microphone feeds silence. This taps the Realtime data channel and prints the
++ * events OpenAI sends back - speech detection, transcripts, and function calls -
++ * so a failure can be located at capture, transcription, or dispatch.
++ *
++ * The fixture is LOOPED on purpose. qa-voice-wav.mjs feeds it with `%noloop`,
++ * and the session needs ~15s to reach LISTENING, by which point a ~9s clip has
++ * already played to nobody.
++ *
++ * Usage:
++ *   node scripts/qa-voice-heard.mjs [--url http://localhost:4173] [--auth user:pass]
++ *                                   [--wav path] [--watch 60000]
++ */
++import { existsSync } from 'node:fs';
++import path from 'node:path';
++import { fileURLToPath } from 'node:url';
++import puppeteer from 'puppeteer';
++
++const here = path.dirname(fileURLToPath(import.meta.url));
++const argv = process.argv;
++const arg = (f, d) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : d);
++const url = arg('--url', 'http://localhost:4173');
++const wav = path.resolve(arg('--wav', path.join(here, 'fixtures/voice/full-globe-turn-on-radio.wav')));
++const watchMs = Number(arg('--watch', '60000'));
++const auth = arg('--auth', null);
++
++if (!existsSync(wav)) throw new Error(`fixture not found: ${wav}`);
++
++const chromePath = [
++  process.env.PUPPETEER_EXECUTABLE_PATH,
++  'C:/Program Files/Google/Chrome/Application/chrome.exe',
++].find((p) => p && existsSync(p));
++
++const browser = await puppeteer.launch({
++  headless: false,
++  ...(chromePath ? { executablePath: chromePath } : {}),
++  args: [
++    '--force-high-performance-gpu',
++    '--use-fake-device-for-media-stream',
++    `--use-file-for-fake-audio-capture=${wav}`, // looped: see header
++    '--use-fake-ui-for-media-stream',
++    '--autoplay-policy=no-user-gesture-required',
++    '--window-size=1440,900',
++  ],
++});
++
++try {
++  const page = await browser.newPage();
++  await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
++  await browser.defaultBrowserContext().overridePermissions(new URL(url).origin, ['microphone']);
++  if (auth) {
++    const [username, ...rest] = auth.split(':');
++    await page.authenticate({ username, password: rest.join(':') });
++  }
++
++  // Tap the Realtime data channel before the app opens one.
++  await page.evaluateOnNewDocument(() => {
++    window.__gevEvents = [];
++    window.__gevAudioSent = null;
++    const nativeCreate = RTCPeerConnection.prototype.createDataChannel;
++    RTCPeerConnection.prototype.createDataChannel = function (...args) {
++      const channel = nativeCreate.apply(this, args);
++      channel.addEventListener('message', (event) => {
++        try {
++          const parsed = JSON.parse(event.data);
++          window.__gevEvents.push(parsed);
++        } catch { /* non-JSON frame */ }
++      });
++      return channel;
++    };
++    // Confirm a live audio track is actually being sent upstream.
++    const nativeAddTrack = RTCPeerConnection.prototype.addTrack;
++    RTCPeerConnection.prototype.addTrack = function (track, ...rest) {
++      if (track?.kind === 'audio') {
++        window.__gevAudioSent = { enabled: track.enabled, muted: track.muted, state: track.readyState, label: track.label };
++      }
++      return nativeAddTrack.call(this, track, ...rest);
++    };
++  });
++
++  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
++  await page.waitForSelector('#gev-voice-button', { timeout: 90000 });
++  await page.click('#gev-voice-button');
++
++  await page.waitForFunction(
++    () => document.getElementById('gev-voice-control')?.dataset?.status === 'listening',
++    { timeout: 90000 },
++  ).catch(() => console.error('[warn] never reached LISTENING'));
++
++  const deadline = Date.now() + watchMs;
++  let seen = 0;
++  while (Date.now() < deadline) {
++    const n = await page.evaluate(() => window.__gevEvents.length);
++    if (n !== seen) {
++      const fresh = await page.evaluate((from) => window.__gevEvents.slice(from).map((e) => e.type), seen);
++      for (const t of fresh) console.error(`  event: ${t}`);
++      seen = n;
++    }
++    const done = await page.evaluate(() =>
++      window.__gevEvents.some((e) => e.type === 'response.function_call_arguments.done' || e.type === 'response.done'));
++    if (done) break;
++    await new Promise((r) => setTimeout(r, 1000));
++  }
++
++  const result = await page.evaluate(() => {
++    const events = window.__gevEvents;
++    const byType = {};
++    for (const e of events) byType[e.type] = (byType[e.type] || 0) + 1;
++    return {
++      audioTrackSent: window.__gevAudioSent,
++      speechDetected: events.some((e) => e.type === 'input_audio_buffer.speech_started'),
++      transcripts: events
++        .filter((e) => e.type === 'conversation.item.input_audio_transcription.completed')
++        .map((e) => e.transcript),
++      functionCalls: events
++        .filter((e) => e.type === 'response.function_call_arguments.done')
++        .map((e) => ({ name: e.name, args: e.arguments })),
++      errors: events.filter((e) => e.type === 'error').map((e) => e.error?.message || JSON.stringify(e).slice(0, 200)),
++      eventCounts: byType,
++      voiceStatus: document.getElementById('gev-voice-control')?.dataset?.status,
++      radioEnabled: Boolean(document.querySelector('[data-layer-id="radio"] input:checked')),
++    };
++  });
++
++  console.log(JSON.stringify(result, null, 2));
++  process.exitCode = result.speechDetected ? 0 : 1;
++} finally {
++  await browser.close();
++}
+diff --git a/scripts/qa-voice-session.mjs b/scripts/qa-voice-session.mjs
+new file mode 100644
+index 0000000..f606381
+--- /dev/null
++++ b/scripts/qa-voice-session.mjs
+@@ -0,0 +1,109 @@
++#!/usr/bin/env node
++/**
++ * qa-voice-session — does the GEV MIC button reach a live Realtime session?
++ *
++ * Drives the real voice control with a fake microphone: clicks the mic, then
++ * watches the panel's own status/error surfaces and the WebRTC connection
++ * state. Proves the whole path end to end - ephemeral token, SDP exchange,
++ * ICE, data channel - which probing /api/realtime/token cannot: that endpoint
++ * returns 200 whether or not the account can actually open a session.
++ *
++ * Usage: node scripts/qa-voice-session.mjs [--url http://localhost:4173] [--watch 40000]
++ */
++import { existsSync } from 'node:fs';
++import puppeteer from 'puppeteer';
++
++const argv = process.argv;
++const arg = (f, d) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : d);
++const url = arg('--url', 'http://localhost:4173');
++const watchMs = Number(arg('--watch', '40000'));
++
++const chromePath = [
++  process.env.PUPPETEER_EXECUTABLE_PATH,
++  'C:/Program Files/Google/Chrome/Application/chrome.exe',
++].find((p) => p && existsSync(p));
++
++const browser = await puppeteer.launch({
++  headless: false,
++  ...(chromePath ? { executablePath: chromePath } : {}),
++  args: [
++    '--force-high-performance-gpu',
++    '--use-fake-device-for-media-stream',
++    '--use-fake-ui-for-media-stream',
++    '--autoplay-policy=no-user-gesture-required',
++  ],
++});
++
++try {
++  const page = await browser.newPage();
++  await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
++  await browser.defaultBrowserContext().overridePermissions(new URL(url).origin, ['microphone']);
++
++  // --auth user:pass, for a deployment behind the basic-auth gate.
++  const auth = arg('--auth', null);
++  if (auth) {
++    const [username, ...rest] = auth.split(':');
++    await page.authenticate({ username, password: rest.join(':') });
++  }
++
++  const voiceLogs = [];
++  page.on('console', (m) => {
++    const t = m.text();
++    if (/realtime|sdp|ice|voice|mic|webrtc|session/i.test(t)) voiceLogs.push(`${m.type()}: ${t.slice(0, 200)}`);
++  });
++
++  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
++  await page.waitForSelector('#gev-voice-button', { timeout: 60000 });
++
++  // Record peer connections without replacing the constructor: patching it
++  // outright broke the app's own construction path on the first attempt.
++  await page.evaluate(() => {
++    window.__gevPcs = [];
++    const create = RTCPeerConnection.prototype.createOffer;
++    RTCPeerConnection.prototype.createOffer = function (...a) {
++      if (!window.__gevPcs.includes(this)) window.__gevPcs.push(this);
++      return create.apply(this, a);
++    };
++  });
++
++  // Can the page get a mic at all? A hang here is an environment fault, not the app's.
++  const micProbe = await page.evaluate(async () => {
++    try {
++      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
++      const n = s.getAudioTracks().length;
++      s.getTracks().forEach((t) => t.stop());
++      return `ok (${n} audio track(s))`;
++    } catch (e) { return `FAILED: ${e.name}: ${e.message}`; }
++  });
++  console.error(`[mic probe] ${micProbe}`);
++
++  const before = await page.evaluate(() => document.getElementById('gev-voice-status')?.textContent?.trim());
++  await page.click('#gev-voice-button');
++
++  const deadline = Date.now() + watchMs;
++  let last = null;
++  while (Date.now() < deadline) {
++    last = await page.evaluate(() => {
++      // Only a tray carrying text is a real error; it lives in the DOM always.
++      const errText = document.getElementById('gev-voice-error-detail')?.textContent?.trim() || '';
++      const pc = window.__gevPcs?.[window.__gevPcs.length - 1] ?? null;
++      return {
++        status: document.getElementById('gev-voice-status')?.textContent?.trim() ?? null,
++        dataStatus: document.getElementById('gev-voice-control')?.dataset?.status ?? null,
++        detail: document.getElementById('gev-voice-detail')?.textContent?.trim() ?? null,
++        cost: document.getElementById('gev-voice-cost-value')?.textContent?.trim() ?? null,
++        error: errText || null,
++        pc: pc ? { conn: pc.connectionState, ice: pc.iceConnectionState, sig: pc.signalingState } : null,
++      };
++    });
++    if (last.error) break;
++    if (last.pc?.conn === 'connected') break;
++    await new Promise((r) => setTimeout(r, 1000));
++  }
++
++  const verdict = last?.error ? 'FAIL' : last?.pc?.conn === 'connected' ? 'PASS' : 'INCONCLUSIVE';
++  console.log(JSON.stringify({ verdict, statusBefore: before, ...last, voiceLogs: voiceLogs.slice(-12) }, null, 2));
++  process.exitCode = verdict === 'PASS' ? 0 : 1;
++} finally {
++  await browser.close();
++}
+diff --git a/scripts/run-windows.ps1 b/scripts/run-windows.ps1
+new file mode 100644
+index 0000000..231df0b
+--- /dev/null
++++ b/scripts/run-windows.ps1
+@@ -0,0 +1,100 @@
++<#
++.SYNOPSIS
++  Launch God's Eye View on Windows at maximum performance.
++
++.DESCRIPTION
++  Serves the production build (minified, ~2.8x the frame rate of `npm run dev`)
++  and opens it in Chrome pinned to the discrete GPU.
++
++  The GPU flag is the single largest win on this machine: on a hybrid-graphics
++  laptop Chrome silently picks the integrated adapter, which measured 55 FPS
++  against 154 FPS on the RTX 3080 Ti. Passing the flag per launch keeps every
++  other Chrome window on the power-saving GPU.
++
++  The macOS helpers (dev-fresh.sh, dev-secure.sh) do not run here; this is the
++  Windows equivalent.
++
++.PARAMETER Dev
++  Run the Vite dev server instead of the production build. Slower, but enables
++  hot reload and the import.meta.env.DEV QA hooks the scripts/qa-*.mjs
++  harnesses need.
++
++.PARAMETER SkipBuild
++  Serve the existing dist/ without rebuilding.
++
++.EXAMPLE
++  .\scripts\run-windows.ps1
++  .\scripts\run-windows.ps1 -Dev
++#>
++[CmdletBinding()]
++param(
++  [switch]$Dev,
++  [switch]$SkipBuild
++)
++
++$ErrorActionPreference = 'Stop'
++$repo = Split-Path -Parent $PSScriptRoot
++Set-Location $repo
++
++if (-not (Test-Path (Join-Path $repo '.env'))) {
++  throw "No .env found. Copy .env.example to .env and set GOOGLE_MAPS_API_KEY."
++}
++
++$envText = Get-Content (Join-Path $repo '.env') -Raw
++if ($envText -match 'GOOGLE_MAPS_API_KEY=PASTE_YOUR') {
++  Write-Warning 'GOOGLE_MAPS_API_KEY is still the placeholder - the globe will not render tiles.'
++}
++
++# vite.config.js fills process.env only where a key is UNDEFINED, so an inherited
++# shell variable silently outranks .env and the file looks ignored. When .env
++# names a key for this project, that is the deliberate one: drop the inherited
++# value for this process so the file wins. Scoped to this launch only - the
++# user-level variable other tools read is untouched.
++foreach ($name in @('OPENAI_API_KEY', 'GOOGLE_MAPS_API_KEY')) {
++  if ($envText -match "(?m)^\s*$name\s*=\s*\S" -and (Test-Path "Env:$name")) {
++    Remove-Item "Env:$name"
++    Write-Host "Using $name from .env (inherited shell value ignored for this run)." -ForegroundColor DarkGray
++  }
++}
++
++$port = 4173
++$url = "http://localhost:$port"
++
++if ($Dev) {
++  $serve = Start-Process -FilePath 'npm.cmd' -ArgumentList @('run','dev','--','--host','localhost','--port',"$port") -PassThru -NoNewWindow
++} else {
++  if (-not $SkipBuild) {
++    Write-Host 'Building production bundle...' -ForegroundColor Cyan
++    & npm.cmd run build
++    if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE" }
++  }
++  $serve = Start-Process -FilePath 'npm.cmd' -ArgumentList @('run','preview','--','--port',"$port") -PassThru -NoNewWindow
++}
++
++Write-Host "Waiting for $url ..." -ForegroundColor Cyan
++$deadline = (Get-Date).AddSeconds(90)
++do {
++  Start-Sleep -Milliseconds 500
++  $up = try { (Invoke-WebRequest -Uri $url -TimeoutSec 3 -UseBasicParsing).StatusCode -eq 200 } catch { $false }
++} until ($up -or (Get-Date) -gt $deadline)
++
++if (-not $up) {
++  if (-not $serve.HasExited) { Stop-Process -Id $serve.Id -Force }
++  throw "Server did not become ready at $url"
++}
++
++$chrome = @(
++  "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
++  "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
++) | Where-Object { Test-Path $_ } | Select-Object -First 1
++
++if ($chrome) {
++  Start-Process -FilePath $chrome -ArgumentList @('--force-high-performance-gpu', $url)
++  Write-Host "Opened $url in Chrome on the discrete GPU." -ForegroundColor Green
++  Write-Host 'Verify at chrome://gpu - "GL Renderer" should name the NVIDIA adapter.' -ForegroundColor DarkGray
++} else {
++  Write-Warning "Chrome not found; open $url manually (integrated GPU will be slower)."
++}
++
++Write-Host "Server PID $($serve.Id). Press Ctrl+C to stop." -ForegroundColor DarkGray
++Wait-Process -Id $serve.Id
+diff --git a/src/server/basicAuthGate.js b/src/server/basicAuthGate.js
+new file mode 100644
+index 0000000..112ef80
+--- /dev/null
++++ b/src/server/basicAuthGate.js
+@@ -0,0 +1,71 @@
++import { timingSafeEqual } from 'node:crypto';
++
++/**
++ * HTTP Basic gate for the whole app, dev server and preview alike.
++ *
++ * Deployed, this app hands out real money: the browser bundle carries the
++ * Google Maps key, and /api/realtime/token mints OpenAI sessions against the
++ * server's own credentials. Anyone who can load the page can spend both, so a
++ * public deployment has to be closed by default.
++ *
++ * Unset credentials leave the gate uninstalled rather than open-with-a-warning,
++ * so localhost keeps working untouched; a half-configured gate (user but no
++ * password) also stays shut rather than authenticating against an empty secret.
++ *
++ * Lives in src/ because the unit runner discovers src/**\/*.test.mjs only.
++ */
++
++/** Compare without leaking length or position through timing. */
++function safeEqual(a, b) {
++  const left = Buffer.from(String(a), 'utf8');
++  const right = Buffer.from(String(b), 'utf8');
++  if (left.length !== right.length) return false;
++  return timingSafeEqual(left, right);
++}
++
++/**
++ * @param {{user?: string, password?: string, realm?: string}} credentials
++ * @returns {import('vite').Plugin}
++ */
++export function basicAuthGate({ user, password, realm = "God's Eye View" } = {}) {
++  const armed = Boolean(user && password);
++
++  function install(middlewares) {
++    if (!armed) return;
++    middlewares.use((req, res, next) => {
++      const header = req.headers?.authorization || '';
++      const [scheme, encoded] = header.split(' ');
++
++      if (scheme === 'Basic' && encoded) {
++        // Buffer.from never throws on bad base64 - it drops invalid bytes - so
++        // the separator check below is what actually rejects malformed input.
++        const decoded = Buffer.from(encoded, 'base64').toString('utf8');
++        const separator = decoded.indexOf(':');
++        if (separator !== -1) {
++          const okUser = safeEqual(decoded.slice(0, separator), user);
++          const okPassword = safeEqual(decoded.slice(separator + 1), password);
++          // Both are evaluated before branching so a wrong username costs the
++          // same as a wrong password.
++          if (okUser && okPassword) {
++            next();
++            return;
++          }
++        }
++      }
++
++      res.statusCode = 401;
++      res.setHeader('WWW-Authenticate', `Basic realm="${realm}", charset="UTF-8"`);
++      res.end('Authentication required');
++    });
++  }
++
++  return {
++    name: 'basic-auth-gate',
++    configureServer(server) {
++      install(server.middlewares);
++    },
++    configurePreviewServer(server) {
++      install(server.middlewares);
++    },
++  };
++}
+diff --git a/src/server/basicAuthGate.test.mjs b/src/server/basicAuthGate.test.mjs
+new file mode 100644
+index 0000000..0caf293
+--- /dev/null
++++ b/src/server/basicAuthGate.test.mjs
+@@ -0,0 +1,84 @@
++/**
++ * The deployed app brokers metered Google and OpenAI keys, so a public URL
++ * must not be reachable without credentials. These pin the gate's contract.
++ */
++import test from 'node:test';
++import assert from 'node:assert/strict';
++
++import { basicAuthGate } from './basicAuthGate.js';
++
++/** Install the plugin on a fake server and return the registered handlers. */
++function install(plugin, hook = 'configureServer') {
++  const handlers = [];
++  plugin[hook]?.({ middlewares: { use: (...args) => handlers.push(args[args.length - 1]) } });
++  return handlers;
++}
++
++/** Drive one handler and capture what it did to the response. */
++async function run(handler, { auth } = {}) {
++  const req = { headers: auth ? { authorization: auth } : {}, url: '/', method: 'GET' };
++  const res = {
++    statusCode: 200,
++    headers: {},
++    ended: false,
++    body: '',
++    setHeader(k, v) { this.headers[k.toLowerCase()] = v; },
++    end(chunk) { this.ended = true; this.body = chunk ?? ''; },
++  };
++  let nextCalled = false;
++  await handler(req, res, () => { nextCalled = true; });
++  return { res, nextCalled };
++}
++
++const creds = { user: 'andrew', password: 'correct-horse' };
++const header = (u, p) => `Basic ${Buffer.from(`${u}:${p}`).toString('base64')}`;
++
++test('gate stays out of the way when no password is configured', () => {
++  assert.equal(install(basicAuthGate({})).length, 0);
++  assert.equal(install(basicAuthGate({ user: 'andrew' })).length, 0, 'a user without a password must not half-arm the gate');
++});
++
++test('a request with no credentials is challenged, not served', async () => {
++  const [handler] = install(basicAuthGate(creds));
++  const { res, nextCalled } = await run(handler);
++
++  assert.equal(nextCalled, false, 'unauthenticated request must not reach the app');
++  assert.equal(res.statusCode, 401);
++  assert.match(res.headers['www-authenticate'] ?? '', /^Basic realm=/);
++});
++
++test('wrong password is rejected', async () => {
++  const [handler] = install(basicAuthGate(creds));
++  const { res, nextCalled } = await run(handler, { auth: header('andrew', 'wrong') });
++
++  assert.equal(nextCalled, false);
++  assert.equal(res.statusCode, 401);
++});
++
++test('wrong username is rejected even with the right password', async () => {
++  const [handler] = install(basicAuthGate(creds));
++  const { nextCalled } = await run(handler, { auth: header('mallory', 'correct-horse') });
++
++  assert.equal(nextCalled, false);
++});
++
++test('correct credentials pass through untouched', async () => {
++  const [handler] = install(basicAuthGate(creds));
++  const { res, nextCalled } = await run(handler, { auth: header('andrew', 'correct-horse') });
++
++  assert.equal(nextCalled, true);
++  assert.equal(res.ended, false, 'the gate must not write to a response it is letting through');
++});
++
++test('a malformed Authorization header is rejected, not crashed on', async () => {
++  const [handler] = install(basicAuthGate(creds));
++  for (const auth of ['Basic', 'Basic !!!not-base64!!!', 'Bearer token', 'Basic ' + Buffer.from('nocolon').toString('base64')]) {
++    const { res, nextCalled } = await run(handler, { auth });
++    assert.equal(nextCalled, false, `must reject: ${auth}`);
++    assert.equal(res.statusCode, 401, `must 401: ${auth}`);
++  }
++});
++
++test('the gate guards the preview server too, not just dev', () => {
++  assert.equal(install(basicAuthGate(creds), 'configurePreviewServer').length, 1);
++});
+diff --git a/src/server/immutableAssets.js b/src/server/immutableAssets.js
+new file mode 100644
+index 0000000..1912654
+--- /dev/null
++++ b/src/server/immutableAssets.js
+@@ -0,0 +1,46 @@
++/**
++ * Cache content-hashed build assets immutably.
++ *
++ * `vite preview` - which serves the deployment, because the API surface is
++ * plugin middleware - sends `cache-control: no-cache` for everything. On a
++ * hashed filename that is pure waste: the browser revalidates several MB of
++ * JS and JSON it already holds on every visit. A hashed name cannot change
++ * contents without changing the URL, so it is safe to freeze for a year.
++ *
++ * index.html is deliberately excluded: it is what points at the current
++ * hashes, so freezing it would pin visitors to a stale build.
++ *
++ * Lives in src/ because the unit runner discovers src/**\/*.test.mjs only.
++ */
++
++export const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
++
++/** Vite emits `name-<hash>.ext`; the hash is base64url-ish and 8+ chars. */
++const HASHED_ASSET = /^\/assets\/.+-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$/i;
++
++export function immutableAssets() {
++  function install(middlewares) {
++    middlewares.use((req, res, next) => {
++      const pathname = (req.url || '').split('?')[0];
++      if (HASHED_ASSET.test(pathname)) {
++        res.setHeader('Cache-Control', IMMUTABLE_CACHE_CONTROL);
++        // The static handler sets its own Cache-Control after this returns, so
++        // pin ours: without this the header is silently downgraded again.
++        const setHeader = res.setHeader.bind(res);
++        res.setHeader = (name, value) =>
++          (String(name).toLowerCase() === 'cache-control' ? res : setHeader(name, value));
++      }
++      next();
++    });
++  }
++
++  return {
++    name: 'immutable-assets',
++    configureServer(server) {
++      install(server.middlewares);
++    },
++    configurePreviewServer(server) {
++      install(server.middlewares);
++    },
++  };
++}
+diff --git a/src/server/immutableAssets.test.mjs b/src/server/immutableAssets.test.mjs
+new file mode 100644
+index 0000000..d8c19f9
+--- /dev/null
++++ b/src/server/immutableAssets.test.mjs
+@@ -0,0 +1,79 @@
++/**
++ * `vite preview` serves content-hashed assets with `cache-control: no-cache`,
++ * so every repeat visit revalidates several MB it already has. These pin the
++ * fix, including the part that is easy to get wrong: the static handler sets
++ * its own Cache-Control afterwards, so ours has to survive that.
++ */
++import test from 'node:test';
++import assert from 'node:assert/strict';
++
++import { immutableAssets, IMMUTABLE_CACHE_CONTROL } from './immutableAssets.js';
++
++function install(plugin, hook = 'configurePreviewServer') {
++  const handlers = [];
++  plugin[hook]?.({ middlewares: { use: (...args) => handlers.push(args[args.length - 1]) } });
++  return handlers;
++}
++
++/** Minimal res double that records headers the way node's does. */
++function makeRes() {
++  const headers = {};
++  return {
++    headers,
++    setHeader(name, value) { headers[name.toLowerCase()] = value; },
++    getHeader(name) { return headers[name.toLowerCase()]; },
++  };
++}
++
++function run(handler, url) {
++  const res = makeRes();
++  let nextCalled = false;
++  handler({ url, method: 'GET', headers: {} }, res, () => { nextCalled = true; });
++  return { res, nextCalled };
++}
++
++test('hashed assets are cached immutably for a year', () => {
++  const [handler] = install(immutableAssets());
++  const { res, nextCalled } = run(handler, '/assets/index-DfCP4k92.js');
++
++  assert.equal(res.getHeader('cache-control'), IMMUTABLE_CACHE_CONTROL);
++  assert.match(IMMUTABLE_CACHE_CONTROL, /immutable/);
++  assert.equal(nextCalled, true, 'the asset still has to be served');
++});
++
++test('the static handler cannot downgrade the header afterwards', () => {
++  const [handler] = install(immutableAssets());
++  const { res } = run(handler, '/assets/index-DfCP4k92.js');
++
++  // sirv sets its own Cache-Control after our middleware returns.
++  res.setHeader('Cache-Control', 'no-cache');
++
++  assert.equal(res.getHeader('cache-control'), IMMUTABLE_CACHE_CONTROL);
++});
++
++test('the entry HTML is never frozen', () => {
++  const [handler] = install(immutableAssets());
++  for (const url of ['/', '/index.html', '/?share=abc']) {
++    const { res } = run(handler, url);
++    assert.notEqual(res.getHeader('cache-control'), IMMUTABLE_CACHE_CONTROL, `must revalidate: ${url}`);
++  }
++});
++
++test('API responses keep their own caching', () => {
++  const [handler] = install(immutableAssets());
++  const { res } = run(handler, '/api/opensky?lamin=30');
++  res.setHeader('Cache-Control', 'no-store');
++
++  assert.equal(res.getHeader('cache-control'), 'no-store');
++});
++
++test('an unhashed file under assets is not frozen', () => {
++  const [handler] = install(immutableAssets());
++  const { res } = run(handler, '/assets/logo.svg');
++
++  assert.notEqual(res.getHeader('cache-control'), IMMUTABLE_CACHE_CONTROL);
++});
++
++test('it applies to the dev server too, not only preview', () => {
++  assert.equal(install(immutableAssets(), 'configureServer').length, 1);
++});
+diff --git a/src/viteProxyParity.test.mjs b/src/viteProxyParity.test.mjs
+new file mode 100644
+index 0000000..78eb4d1
+--- /dev/null
++++ b/src/viteProxyParity.test.mjs
+@@ -0,0 +1,41 @@
++/**
++ * Every /api proxy must serve the production preview server, not just dev.
++ *
++ * The app's whole backend is Vite middleware. A plugin that only implements
++ * `configureServer` disappears from `vite preview`, so a production build
++ * silently loses that data source — the layer renders empty with no error.
++ * Lives in src/ because the unit runner discovers src/**\/*.test.mjs only.
++ */
++import test from 'node:test';
++import assert from 'node:assert/strict';
++
++import configFactory from '../vite.config.js';
++
++/** Route paths a plugin registers when Vite installs it on one server hook. */
++function registeredRoutes(plugin, hook) {
++  const routes = [];
++  const server = { middlewares: { use(route) { if (typeof route === 'string') routes.push(route); } } };
++  plugin[hook]?.(server);
++  return routes.sort();
++}
++
++const { plugins } = configFactory({ mode: 'development', command: 'serve' });
++const proxyPlugins = plugins.filter((p) => typeof p?.name === 'string' && /-prox(y|ies)$/.test(p.name));
++
++test('every API proxy registers the same routes on preview as on dev', () => {
++  assert.ok(proxyPlugins.length > 0, 'no -proxy plugins found in the Vite config');
++
++  const devOnly = proxyPlugins
++    .map((plugin) => ({
++      name: plugin.name,
++      dev: registeredRoutes(plugin, 'configureServer'),
++      preview: registeredRoutes(plugin, 'configurePreviewServer'),
++    }))
++    .filter(({ dev, preview }) => dev.join('|') !== preview.join('|'));
++
++  assert.deepEqual(
++    devOnly.map((entry) => entry.name),
++    [],
++    `these proxies vanish from the production preview server: ${JSON.stringify(devOnly, null, 2)}`,
++  );
++});
+diff --git a/vite.config.js b/vite.config.js
+index fc6acc5..24a8924 100644
+--- a/vite.config.js
++++ b/vite.config.js
+@@ -44,6 +44,8 @@ import { fileURLToPath } from 'node:url';
+ import { createRequire } from 'node:module';
+ import { defineConfig, loadEnv } from 'vite';
+ import cesium from 'vite-plugin-cesium';
++import { basicAuthGate } from './src/server/basicAuthGate.js';
++import { immutableAssets } from './src/server/immutableAssets.js';
+ import { normalizeRadioCountryInput } from './src/data/radioCountry.js';
+ import {
+   normalizeRegionalArticles,
+@@ -7323,6 +7325,21 @@ function normalizeAisTimestamp(value) {
+   return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+ }
+ 
++/**
++ * Serve a proxy plugin's dev middleware on the production preview server too.
++ *
++ * This app's backend is the proxy middleware below, so a plugin that implements
++ * only `configureServer` disappears from `vite preview`: the built app loses
++ * that data source with no error at all — the layer just stays empty. Vite
++ * invokes hooks with its own `this`, so the dev hook is reused as a plain
++ * function reference rather than delegated through the object. A plugin that
++ * already defines its own preview hook is returned untouched.
++ */
++function alsoServePreview(plugin) {
++  if (plugin.configurePreviewServer || !plugin.configureServer) return plugin;
++  return { ...plugin, configurePreviewServer: plugin.configureServer };
++}
++
+ /**
+  * Main Vite configuration factory.
+  *
+@@ -7340,26 +7357,34 @@ export default defineConfig(({ mode }) => {
+   const env = { ...process.env };
+   return {
+     plugins: [
++      // First, so nothing behind it - assets, proxies, the OpenAI token minter -
++      // is reachable unauthenticated. Uninstalled entirely when unset, so
++      // localhost is unaffected.
++      basicAuthGate({ user: env.GEV_AUTH_USER, password: env.GEV_AUTH_PASSWORD }),
++      // After the gate, before the static handler whose header it overrides.
++      immutableAssets(),
+       cesium(),
+-      openSkyProxy(),
+-      celestrakProxy(),
+-      tomtomProxy(),
+-      firmsProxy(),
+-      rocketLaunchesProxy(),
+-      terrainHeightsProxy(),
+-      adsbdbProxy(),
+-      overpassProxy(),
+-      militaryInstallationsProxy(),
+-      regionalBriefProxy(),
+-      weatherEffectsProxy(),
+-      cctvProxy(),
+-      radioBrowserProxy(),
+-      gbfsProxy(),
+-      adsbLolProxy(),
+-      aisLiveProxy(),
+-      trackBackfillProxies(),
+-      openAiRealtimeProxy(),
+-      googlePlacesContextProxy(),
++      ...[
++        openSkyProxy(),
++        celestrakProxy(),
++        tomtomProxy(),
++        firmsProxy(),
++        rocketLaunchesProxy(),
++        terrainHeightsProxy(),
++        adsbdbProxy(),
++        overpassProxy(),
++        militaryInstallationsProxy(),
++        regionalBriefProxy(),
++        weatherEffectsProxy(),
++        cctvProxy(),
++        radioBrowserProxy(),
++        gbfsProxy(),
++        adsbLolProxy(),
++        aisLiveProxy(),
++        trackBackfillProxies(),
++        openAiRealtimeProxy(),
++        googlePlacesContextProxy(),
++      ].map(alsoServePreview),
+     ],
+     server: {
+       host: env.HOST || 'localhost',
+@@ -7369,6 +7394,23 @@ export default defineConfig(({ mode }) => {
+         ? true
+         : ['localhost', '127.0.0.1', '.local'],
+     },
++    // `vite preview` is what serves a deployment here, because the whole API
++    // surface is plugin middleware. A PaaS injects PORT and needs 0.0.0.0, and
++    // Vite refuses a Host header it does not know - unset, that is a blank page
++    // on the deploy URL with a working server behind it.
++    preview: {
++      host: env.HOST || 'localhost',
++      port: parseInt(env.PORT, 10) || 4173,
++      // RAILWAY_PUBLIC_DOMAIN is injected by the platform, which avoids the
++      // bootstrap problem of needing the deploy URL before the first deploy
++      // exists. GEV_ALLOWED_HOSTS covers a custom domain or another host.
++      allowedHosts: [
++        'localhost',
++        '127.0.0.1',
++        env.RAILWAY_PUBLIC_DOMAIN,
++        ...(env.GEV_ALLOWED_HOSTS ? env.GEV_ALLOWED_HOSTS.split(',') : []),
++      ].map((host) => host?.trim()).filter(Boolean),
++    },
+     // Expose selected API keys to the browser via import.meta.env.*
+     define: {
+       'import.meta.env.GOOGLE_MAPS_API_KEY': JSON.stringify(env.GOOGLE_MAPS_API_KEY),

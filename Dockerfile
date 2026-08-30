@@ -89,4 +89,7 @@ COPY --from=build /app/seed-cache/celestrak-*.json ./.gev-cache/
 # The port is read from $PORT at runtime (see the `preview` block in vite.config.js).
 EXPOSE 4173
 
-CMD ["npx", "vite", "preview"]
+# Exec vite directly rather than through `npx`. As PID 1, npx does not forward
+# SIGTERM to its child, so Cloud Run's shutdown signal never reaches the server
+# and every scale-down and deploy drops in-flight requests instead of draining.
+CMD ["node", "node_modules/vite/bin/vite.js", "preview"]
