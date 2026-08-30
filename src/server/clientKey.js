@@ -18,6 +18,22 @@
  * Lives in src/ because the unit runner discovers src/**\/*.test.mjs only.
  */
 
+/**
+ * Fold equivalent spellings of one address together.
+ *
+ * `1.2.3.4`, `1.2.3.4:443` and `::ffff:1.2.3.4` are the same client, and left
+ * distinct they are three separate rate-limit buckets - three times the quota
+ * for anyone who varies the spelling. Real IPv6 is left alone: it is only the
+ * IPv4-mapped form and a trailing IPv4 port that are rewritten.
+ */
+function canonicalizeAddress(value) {
+  let address = value.trim().toLowerCase();
+  if (address.startsWith('::ffff:') && address.includes('.')) address = address.slice('::ffff:'.length);
+  // Strip a port only from IPv4 - a bare colon in IPv6 is part of the address.
+  if (/^\d{1,3}(\.\d{1,3}){3}:\d+$/.test(address)) address = address.split(':')[0];
+  return address;
+}
+
 /** Hops must be a small non-negative integer; anything else means "trust nothing". */
 function normalizeHops(value) {
   const hops = Math.trunc(Number(value));
@@ -31,7 +47,8 @@ function normalizeHops(value) {
  * @returns {string}
  */
 export function clientKeyFrom(req, trustedProxyHops = 0) {
-  const socketKey = String(req?.socket?.remoteAddress || 'local');
+  const rawSocket = req?.socket?.remoteAddress;
+  const socketKey = rawSocket ? canonicalizeAddress(String(rawSocket)) : 'local';
   const hops = normalizeHops(trustedProxyHops);
   if (hops === 0) return socketKey;
 
@@ -46,5 +63,6 @@ export function clientKeyFrom(req, trustedProxyHops = 0) {
   // reading the left edge, which is exactly the value an attacker controls.
   if (parts.length < hops) return socketKey;
 
-  return parts[parts.length - hops] || socketKey;
+  const selected = parts[parts.length - hops];
+  return selected ? canonicalizeAddress(selected) : socketKey;
 }

@@ -7373,7 +7373,16 @@ export default defineConfig(({ mode }) => {
       // First, so nothing behind it - assets, proxies, the OpenAI token minter -
       // is reachable unauthenticated. Uninstalled entirely when unset, so
       // localhost is unaffected.
-      basicAuthGate({ user: env.GEV_AUTH_USER, password: env.GEV_AUTH_PASSWORD }),
+      // `required` whenever the server is not bound to localhost. Missing
+      // credentials then refuse service instead of silently uninstalling the
+      // gate: this process serves the Google Maps key inside its bundle and
+      // mints OpenAI sessions on request, so failing open publishes both. A
+      // localhost run is unaffected and still needs no credentials.
+      basicAuthGate({
+        user: env.GEV_AUTH_USER,
+        password: env.GEV_AUTH_PASSWORD,
+        required: Boolean(env.HOST) && !['localhost', '127.0.0.1', '::1'].includes(env.HOST),
+      }),
       // After the gate, before the static handler whose header it overrides.
       immutableAssets(),
       // Node closes idle keep-alive sockets after 5s; Cloud Run's load balancer
