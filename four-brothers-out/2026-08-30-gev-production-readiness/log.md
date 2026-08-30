@@ -59,3 +59,16 @@ and no worse than the pre-fix behaviour); D7 (dead defensive code).
 Unverified, left open: WebSocket upgrades never traverse the connect stack, so
 the gate cannot see them. Only matters if a deployment runs dev mode rather than
 preview; this one runs preview.
+
+## Round 3 — closing Grok's open item
+
+"WebSocket upgrades never traverse the connect stack, so the gate cannot see
+them" — VERIFIED AS NOT A HOLE. No inbound WebSocket server is registered
+anywhere in vite.config.js (no WebSocketServer, handleUpgrade, or 'upgrade'
+listener; the AIS socket is outbound only), and an upgrade request against the
+live deployment returns 401. The gate catches it.
+
+Also fixed a self-inflicted regression: deploy credentials in .env arm the gate
+on localhost too, so a fresh local run started demanding a password. The gate
+was NOT weakened - run-windows.ps1 now prints the credentials, because silently
+ignoring configured credentials is the worse trade.

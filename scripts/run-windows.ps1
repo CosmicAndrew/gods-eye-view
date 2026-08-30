@@ -45,6 +45,17 @@ if ($envText -match 'GOOGLE_MAPS_API_KEY=PASTE_YOUR') {
   Write-Warning 'GOOGLE_MAPS_API_KEY is still the placeholder - the globe will not render tiles.'
 }
 
+# Credentials in .env arm the gate on localhost too, so the browser prompts.
+# Surface them here rather than leaving an unexplained login box: silently
+# ignoring configured credentials would be the worse trade.
+if ($envText -match '(?m)^\s*GEV_AUTH_USER\s*=\s*(\S+)' ) {
+  $gateUser = $Matches[1]
+  $gatePass = if ($envText -match '(?m)^\s*GEV_AUTH_PASSWORD\s*=\s*(\S+)') { $Matches[1] } else { $null }
+  if ($gatePass) {
+    Write-Host "Password gate is armed - sign in as $gateUser / $gatePass" -ForegroundColor Yellow
+  }
+}
+
 # vite.config.js fills process.env only where a key is UNDEFINED, so an inherited
 # shell variable silently outranks .env and the file looks ignored. When .env
 # names a key for this project, that is the deliberate one: drop the inherited
