@@ -72,3 +72,31 @@ Also fixed a self-inflicted regression: deploy credentials in .env arm the gate
 on localhost too, so a fresh local run started demanding a password. The gate
 was NOT weakened - run-windows.ps1 now prints the credentials, because silently
 ignoring configured credentials is the worse trade.
+
+## Round 4 — Codex finally reviewed the auth gate
+
+Quota lifted after an 18-minute poll. Codex is the ONLY brother whose citations
+were 100% accurate: all four verified verbatim against the files. It also RAN
+the suite (31 auth/client-key tests) and empirically established that Node
+24.16.0 answers an oversized header with 431 - Gemini had claimed a
+"megabytes of base64" DoS, which is false.
+
+Its output began at finding "2.", so finding 1 was lost and this review is
+INCOMPLETE. Not treated as a clean bill of health.
+
+Reported and acted on:
+  #2 `header.split(' ')` broke on RFC 7235's optional whitespace, so
+     `Basic  <token>` returned 401 - a lockout of a conforming client. Fixed.
+
+Reported and accepted, not fixed:
+  #3 Overstating GEV_TRUSTED_PROXY_HOPS makes the selected XFF entry
+     attacker-written. Codex noted .env is 1, so it is not exploitable on the
+     one-frontend Cloud Run path. Operator error, safe default.
+  #4 One IP is not one caller: NAT collapses two callers into one bucket, and
+     IPv6 rotation mints fresh ones. Inherent to IP-based limiting; the only
+     stronger identity here is the single shared password, which does not
+     differentiate.
+
+Codex found NO defect in credential-free reachability, the fail-open behaviour,
+duplicate headers, or secret-dependent timing - the areas the earlier fixes
+targeted.

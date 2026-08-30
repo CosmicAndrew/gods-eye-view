@@ -74,7 +74,10 @@ export function basicAuthGate({ user, password, realm = "God's Eye View", requir
     }
     middlewares.use((req, res, next) => {
       const header = req.headers?.authorization || '';
-      const [scheme, encoded] = header.split(' ');
+      // RFC 7235 allows optional whitespace between the scheme and the
+      // credentials, so `Basic  <token>` is valid. Splitting on one space left
+      // `encoded` empty and rejected a conforming client.
+      const [scheme, encoded] = header.trim().split(/\s+/);
 
       // RFC 7235 makes the auth-scheme case-insensitive; matching only "Basic"
       // locks out a conforming client rather than stopping an attacker.
