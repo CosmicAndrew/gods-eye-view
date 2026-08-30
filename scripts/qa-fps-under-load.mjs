@@ -57,6 +57,12 @@ try {
     return d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : 'unknown';
   });
 
+  // Chrome throttles requestAnimationFrame in an unfocused window, which
+  // produces a nonsense reading: a frame count far below what the frame
+  // intervals imply (0.7fps alongside a 75ms median). Foreground it first.
+  await page.bringToFront();
+  await new Promise((r) => setTimeout(r, 1500));
+
   // Sample frame intervals while the camera is actually moving.
   const stats = await page.evaluate(() => new Promise((resolve) => {
     const cam = window.viewer?.camera;
@@ -72,9 +78,14 @@ try {
       else {
         gaps.sort((a, b) => a - b);
         const at = (p) => gaps[Math.min(gaps.length - 1, Math.floor(gaps.length * p))];
+        const fps = +(gaps.length / ((now - t0) / 1000)).toFixed(1);
+        const impliedFps = +(1000 / at(0.5)).toFixed(1);
         resolve({
           frames: gaps.length,
-          fps: +(gaps.length / ((now - t0) / 1000)).toFixed(1),
+          fps,
+          // A count far below what the intervals imply means the window lost
+          // focus mid-sample and the number is not a frame rate.
+          throttled: impliedFps > fps * 2,
           medianMs: +at(0.5).toFixed(1),
           p95Ms: +at(0.95).toFixed(1),
           worstMs: +gaps[gaps.length - 1].toFixed(1),
