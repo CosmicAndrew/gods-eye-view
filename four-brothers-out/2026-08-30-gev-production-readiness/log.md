@@ -100,3 +100,26 @@ Reported and accepted, not fixed:
 Codex found NO defect in credential-free reachability, the fail-open behaviour,
 duplicate headers, or secret-dependent timing - the areas the earlier fixes
 targeted.
+
+## Round 5 — the lost finding recovered
+
+Codex's quota reset overnight; re-ran the review telling it what was already
+fixed or accepted. It recovered the missing finding 1 and stated explicitly
+that nothing else survived.
+
+Codex is 2-for-2 on citation accuracy across both reviews - the only brother
+with a clean record. It also demonstrated the defect empirically (1,000
+consecutive wrong passwords, all 401, none throttled) rather than reasoning
+about it, and re-ran the suite (37/37).
+
+  #1 No failed-attempt throttle. Every wrong password got an immediate 401 with
+     no counter, delay or lockout. The app's own spend limiters could not cover
+     this: the gate runs FIRST, so a guess never reaches one. The password is
+     long enough that guessing it is not the realistic risk - the cost is, since
+     on Cloud Run every attempt is a billable request, which made the only
+     control on the app an unmetered one. Fixed: 8 failures per 5-minute window
+     then 429 + Retry-After, cleared by a correct password, bounded map with LRU
+     eviction so rotating source addresses cannot grow it.
+     Verified by re-running the same attack: was 1000x401, now 8x401 + 992x429.
+
+AUTH GATE REVIEW IS NOW COMPLETE. No finding outstanding.

@@ -1,4 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { createAuthThrottle } from './authThrottle.js';
+import { clientKeyFrom } from './clientKey.js';
 
 /** Hosts that only this machine can reach. Anything else is a public bind. */
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1']);
@@ -54,6 +56,9 @@ function safeEqual(a, b) {
  */
 export function basicAuthGate({ user, password, realm = "God's Eye View", required = false } = {}) {
   const armed = Boolean(user && password);
+  // Shared across both hooks so dev and preview cannot be used as two
+  // independent guessing budgets.
+  const throttle = createAuthThrottle();
 
   // A public bind detected at hook time also requires the gate, so the caller
   // cannot forget to pass `required` on the CLI path.
@@ -73,6 +78,19 @@ export function basicAuthGate({ user, password, realm = "God's Eye View", requir
       return;
     }
     middlewares.use((req, res, next) => {
+      // Behind Cloud Run the socket peer is the front end, so the same hop
+      // count the spend limiters use is what makes this per-caller.
+      const who = clientKeyFrom(req, process.env.GEV_TRUSTED_PROXY_HOPS);
+      const wait = throttle.blockedFor(who);
+      if (wait > 0) {
+        // 429 before any comparison: a caller in cooldown gets no further
+        // signal, and a guess costs them a refusal rather than a test.
+        res.statusCode = 429;
+        res.setHeader('Retry-After', String(wait));
+        res.setHeader('Cache-Control', 'no-store');
+        res.end('Too many failed attempts');
+        return;
+      }
       const header = req.headers?.authorization || '';
       // RFC 7235 allows optional whitespace between the scheme and the
       // credentials, so `Basic  <token>` is valid. Splitting on one space left
@@ -92,12 +110,14 @@ export function basicAuthGate({ user, password, realm = "God's Eye View", requir
           // Both are evaluated before branching so a wrong username costs the
           // same as a wrong password.
           if (okUser && okPassword) {
+            throttle.recordSuccess(who);
             next();
             return;
           }
         }
       }
 
+      throttle.recordFailure(who);
       res.statusCode = 401;
       res.setHeader('WWW-Authenticate', `Basic realm="${realm}", charset="UTF-8"`);
       res.end('Authentication required');
