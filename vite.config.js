@@ -4797,13 +4797,18 @@ function aisLiveProxy() {
 
         const feed = aisStreamStatusSnapshot();
 
-        res.statusCode = process.env.AISSTREAM_API_KEY ? 200 : 503;
+        const keyRequired = !process.env.AISSTREAM_API_KEY;
+        res.statusCode = keyRequired ? 503 : 200;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.setHeader('Cache-Control', 'no-store');
         res.end(JSON.stringify({
           rows,
           source: 'AISStream',
-          status: feed.status,
+          // Distinct terminal state so the client shows KEY REQUIRED rather than
+          // a generic error that folds the global loading chip into LOAD FAILED
+          // (mirrors the FIRMS proxy's no_key signal).
+          keyRequired,
+          status: keyRequired ? 'no_key' : feed.status,
           error: feed.error,
           refreshing: feed.status !== 'live',
           newestPositionAt: newestAisPositionAt(rows),

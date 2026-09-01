@@ -73,6 +73,20 @@ test('snapshot classification distinguishes raw rows from accepted vessel positi
   assert.equal(snapshot.error, null);
 });
 
+test('an unconfigured AIS key surfaces keyRequired, not a generic error', () => {
+  // The server sends keyRequired on its 503 when AISSTREAM_API_KEY is unset.
+  // Without this the layer reported a plain error and poisoned the global
+  // loading chip into "LOAD FAILED" - the FIRMS layer already models this.
+  const snapshot = classifyAisFeedSnapshot({ status: 'no_key', keyRequired: true, rows: [] });
+  assert.equal(snapshot.keyRequired, true);
+  assert.equal(snapshot.error, 'KEY REQUIRED');
+});
+
+test('a normally-empty feed is not treated as key-required', () => {
+  const snapshot = classifyAisFeedSnapshot({ status: 'connecting', rows: [] });
+  assert.notEqual(snapshot.keyRequired, true);
+});
+
 test('raw rows that all fail normalization do not satisfy AIS product health', () => {
   const snapshot = classifyAisFeedSnapshot({
     status: 'open',

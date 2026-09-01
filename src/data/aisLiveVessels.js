@@ -217,6 +217,10 @@ export function classifyAisFeedSnapshot(payload) {
   const transportStatus = typeof payload?.status === 'string' ? payload.status : null;
   const lastMessageAt = payload?.lastMessageAt ?? null;
   const acceptedRowCount = acceptedRows.length;
+  // A deliberately unconfigured key is a truthful terminal state for this row,
+  // not a failed feed. Mirrors firmsHeatmap: KEY REQUIRED, not an error that
+  // folds the global loading chip into "LOAD FAILED".
+  const keyRequired = payload?.keyRequired === true;
   return {
     transportStatus,
     lastMessageAt,
@@ -224,8 +228,11 @@ export function classifyAisFeedSnapshot(payload) {
     acceptedRows,
     rawRowCount: rawRows.length,
     acceptedRowCount,
-    error: deriveAisFeedError(payload, acceptedRowCount)
-      || (acceptedRowCount === 0 ? 'awaiting usable AIS positions…' : null),
+    keyRequired,
+    error: keyRequired
+      ? 'KEY REQUIRED'
+      : deriveAisFeedError(payload, acceptedRowCount)
+        || (acceptedRowCount === 0 ? 'awaiting usable AIS positions…' : null),
   };
 }
 
@@ -648,11 +655,14 @@ const aisLiveVesselsLayer = {
     return {
       count: state.count,
       lastUpdate: state.lastUpdate,
-      loading: state.loading || waitingForFirstPosition,
-      loadingLabel: waitingForFirstPosition
-        ? AIS_FIRST_CONNECT_LABEL
-        : state.loadingLabel,
-      error: state.error,
+      loading: state.keyRequired ? false : (state.loading || waitingForFirstPosition),
+      loadingLabel: state.keyRequired
+        ? 'KEY REQUIRED'
+        : waitingForFirstPosition
+          ? AIS_FIRST_CONNECT_LABEL
+          : state.loadingLabel,
+      keyRequired: state.keyRequired,
+      error: state.keyRequired ? 'KEY REQUIRED' : state.error,
       stale: state.stale,
       status: state.firstConnectPhase === 'unavailable' ? 'unavailable' : undefined,
       transportStatus: state.transportStatus,
@@ -684,6 +694,8 @@ const state = {
   lastMessageAt: null,
   rawRowCount: 0,
   acceptedRowCount: 0,
+  /** True when the server reports AISSTREAM_API_KEY is unset (503 keyRequired). */
+  keyRequired: false,
   /** Monotonic enable/reset owner for requests and first-connect timers. */
   sessionId: 0,
   /** @type {'idle'|'loading'|'ready'|'unavailable'} */
@@ -905,6 +917,7 @@ function applyAisFeedSnapshot(viewer, payload) {
   state.lastMessageAt = snapshot.lastMessageAt;
   state.rawRowCount = snapshot.rawRowCount;
   state.acceptedRowCount = snapshot.acceptedRowCount;
+  state.keyRequired = snapshot.keyRequired === true;
 
   if (snapshot.acceptedRowCount === 0) {
     state.count = state.vesselRecords.length;
