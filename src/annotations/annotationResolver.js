@@ -30,6 +30,8 @@ const enclosingAreaCache = new Map(); // smallest enclosing named non-building p
 const NEG_CACHE_TTL_MS = 60_000;
 
 /** Read a cache entry → value | null (cached not-found within TTL) | undefined (miss/expired). */
+import { geocodeNameConfidentlyMatches } from './geocodeNameMatch.js';
+
 function cacheRead(cache, key) {
   const entry = cache.get(key);
   if (!entry) return undefined;
@@ -241,7 +243,14 @@ export async function resolveAnnotationTarget({
     const limitKm = Math.max(VIEWPORT_DRIFT_FACTOR * vpGate.radiusKm, MIN_DRIFT_FLOOR_KM);
     return driftKm > limitKm ? { driftKm, limitKm } : null;
   };
-  if (fromGeocode && !bypassNearViewGuards) {
+  // A canonical name that echoes the whole ask is not a mis-match at any
+  // distance - it is the place the user named. Without this, marking LAX from
+  // a camera over Texas was rejected at 1991km against a 50km limit and
+  // reported as "nothing could be marked". A name covering only part of the
+  // ask ("the Texas Capitol" -> "Texas") stays gated, which is the case the
+  // guard exists for.
+  const echoesTheAsk = geocodeNameConfidentlyMatches(trace.query, geocodePrimary || label, geocodeTypes);
+  if (fromGeocode && !bypassNearViewGuards && !echoesTheAsk) {
     const drift = gateDrift(lat, lon);
     if (drift) {
       if (trace.query) {
