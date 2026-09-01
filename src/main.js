@@ -120,6 +120,12 @@ async function init() {
       contextOptions: {
         webgl: {
           preserveDrawingBuffer: true,
+          // Ask for the discrete adapter. Left unset the browser chooses, and
+          // on a hybrid-graphics laptop it chooses integrated: 16.5 fps against
+          // 60.1 on the same machine, same scene. A Chrome launch flag fixes
+          // that only for whoever remembers to use one, which is nobody opening
+          // the page from an ordinary window.
+          powerPreference: 'high-performance',
         },
       },
     });
