@@ -43,6 +43,15 @@ const tokens = (value) => normalize(value).split(' ').filter(Boolean);
  */
 export function geocodeNameConfidentlyMatches(query, primaryName, types = []) {
   if (!Array.isArray(types) || !types.some((t) => UNAMBIGUOUS_TYPES.has(String(t)))) return false;
+
+  // A bare code echoes the whole ask: "annotate LAX" against a geocoder result
+  // of "... (LAX)". The type gate above already confirmed a transport hub, so a
+  // code that equals the ask is unambiguous. Checked before the parens are
+  // stripped, since that is where the code lives.
+  const askJoined = tokens(query).join(' ');
+  const codes = [...String(primaryName ?? '').matchAll(/\(([^)]+)\)/g)].map((m) => m[1]);
+  if (askJoined && codes.some((c) => tokens(c).join(' ') === askJoined)) return true;
+
   const askTokens = tokens(query);
   const gotTokens = tokens(primaryName);
   if (!askTokens.length || !gotTokens.length) return false;

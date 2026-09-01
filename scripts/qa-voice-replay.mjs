@@ -26,26 +26,38 @@ const only = arg('--only', null);
 
 /** Verbatim from the demo, with the clauses each one is supposed to satisfy. */
 const COMMANDS = [
-  {
-    say: 'Take me to the Texas State Capitol in Austin, Texas and start orbiting around it.',
-    expect: ['fly_to_location', 'move_camera'],
-  },
-  {
-    say: 'Can you turn on the CCTV layer and also annotate the Texas State Capitol building outline? And maybe also annotate the compound as well.',
-    expect: ['set_layer_visibility|control_cctv', 'annotate_map', 'annotate_map'],
-  },
-  {
-    say: 'Annotate LAX and Dallas Fort Worth and tell me the relative distance between them.',
-    expect: ['annotate_map', 'annotate_map', 'spoken-distance'],
-  },
-  {
-    say: 'Take me out to a globe view and then annotate the state of Texas and the state of California.',
-    expect: ['zoom_to_globe', 'annotate_map', 'annotate_map'],
-  },
-  {
-    say: 'Take me to China and turn on the dams layer.',
-    expect: ['fly_to_location', 'set_layer_visibility'],
-  },
+  { say: 'Take me to the Texas State Capitol in Austin, Texas and start orbiting around it.',
+    expect: ['fly_to_location', 'move_camera'] },
+  { say: 'Turn on the CCTV layer and also annotate the Texas State Capitol building outline, and also annotate the compound as well.',
+    expect: ['set_layer_visibility|control_cctv', 'annotate_map', 'annotate_map'] },
+  { say: 'Zoom out a little bit.',
+    expect: ['adjust_camera_zoom'] },
+  { say: 'What are the most interesting monuments and sites to see on the Texas Capitol grounds?',
+    expect: ['spoken-answer'] },
+  { say: 'Annotate the grounds of Zilker Park on the map, and also annotate Lady Bird Lake.',
+    expect: ['annotate_map', 'annotate_map'] },
+  { say: 'Give me walking directions from Zilker Park to the Tejano Monument.',
+    expect: ['fly_route'] },
+  { say: 'Travel and animate over that path.',
+    expect: ['control_scene|fly_route'] },
+  { say: 'Take me out to a globe view and then annotate the state of Texas and the state of California.',
+    expect: ['zoom_to_globe', 'annotate_map', 'annotate_map'] },
+  { say: 'Annotate LAX and Dallas Fort Worth and tell me the relative distance between them.',
+    expect: ['annotate_map', 'annotate_map', 'spoken-distance'] },
+  { say: 'Turn on contacts mode and select the nearest helicopter we have got.',
+    expect: ['set_context_mode|set_map_stack', 'select_nearest_aircraft'] },
+  { say: 'Go to San Francisco please.',
+    expect: ['fly_to_location'] },
+  { say: 'Outline the Presidio.',
+    expect: ['annotate_map'] },
+  { say: 'Annotate the Palace of Fine Arts and take me to it, highlight its building compound.',
+    expect: ['annotate_map', 'fly_to_location'] },
+  { say: 'Take me to China and turn on the dams layer.',
+    expect: ['fly_to_location', 'set_layer_visibility'] },
+  { say: 'What is the most significant dam we should check out in China?',
+    expect: ['spoken-answer'] },
+  { say: 'Take me to the most mountainous region in the world.',
+    expect: ['fly_to_location'] },
 ];
 
 const chromePath = [

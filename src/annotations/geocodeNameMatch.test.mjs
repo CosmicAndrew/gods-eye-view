@@ -54,6 +54,24 @@ test('case, punctuation and a leading article do not decide it', () => {
   assert.equal(matches('Dallas/Fort Worth Intl. Airport', 'Dallas Fort Worth Intl Airport', AIRPORT), true);
 });
 
+test('a bare airport code matches its own parenthetical code', () => {
+  // "annotate LAX" from a far camera: the geocoder returns the full name with
+  // the code, and the code echoes the whole ask. Found in review.
+  assert.equal(matches('LAX', 'Los Angeles International Airport (LAX)', AIRPORT), true);
+  assert.equal(matches('DFW', 'Dallas/Fort Worth International Airport (DFW)', AIRPORT), true);
+  assert.equal(matches('lax', 'Los Angeles International Airport (LAX)', AIRPORT), true);
+});
+
+test('a code match still requires a transport-hub type', () => {
+  // No airport type = no bypass, even if a code happens to echo.
+  assert.equal(matches('OSU', 'Ohio State University (OSU)', ['university']), false);
+});
+
+test('a partial or wrong code does not match', () => {
+  assert.equal(matches('LA', 'Los Angeles International Airport (LAX)', AIRPORT), false);
+  assert.equal(matches('SFO', 'Los Angeles International Airport (LAX)', AIRPORT), false);
+});
+
 test('unrelated names never match', () => {
   assert.equal(matches('Los Angeles International Airport', 'Denver International Airport', AIRPORT), false);
   assert.equal(matches('Zilker Park', 'Lady Bird Lake', AIRPORT), false);
