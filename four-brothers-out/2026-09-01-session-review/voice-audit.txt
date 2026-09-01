@@ -81,3 +81,45 @@
    expected : set_context_mode|set_map_stack + select_nearest_aircraft
    called   : set_context_mode({"mode":"contacts"})  control_cockpit({"action":"next","targetLayer":"flights","aircraftClass":"helicopter"})
    said     : Let me check what’s nearby in contacts mode and find the closest helicopter. Contacts mode is on, and the nearest helicopter selected is N361TX.
+
+────────────────────────────────────────────────────────────────────────
+11. "Go to San Francisco please."
+   expected : fly_to_location
+   called   : fly_to_location({"locationId":"sf"})
+   said     : Done. You’re now in San Francisco with a city overview.
+
+────────────────────────────────────────────────────────────────────────
+12. "Outline the Presidio."
+   expected : annotate_map
+   called   : annotate_map({"annotations":[{"type":"area","target":"Presidio of San Francisco","l)
+   said     : I’ll mark the Presidio boundary so you can see the area clearly. Nothing could be marked, and I couldn’t pinpoint “Presidio of San Francisco” from the place-name data, so no outline appeared.
+   network  : console: [Resolver] "Presidio of San Francisco": places=far-ignored geocode=37.79238,-122.48101 osmSnap=skipped → FINAL source=rejected (proximity gate, 2432km > 50km)
+
+────────────────────────────────────────────────────────────────────────
+13. "Annotate the Palace of Fine Arts and take me to it, highlight its building compound."
+   expected : annotate_map + fly_to_location
+   called   : annotate_map({"annotations":[{"type":"area","target":"Palace of Fine Arts, San Fran)
+   said     : I’ll mark the Palace of Fine Arts and fly you there. Nothing could be marked, and I couldn’t pinpoint “Palace of Fine Arts, San Francisco” from the place-name data, so no highlight appeared.
+   network  : console: [Resolver] "Palace of Fine Arts, San Francisco": places=far-ignored geocode=37.80293,-122.44842 osmSnap=skipped → FINAL source=rejected (proximity gate, 2429km > 50km)
+
+────────────────────────────────────────────────────────────────────────
+14. "Take me to China and turn on the dams layer."
+   expected : fly_to_location + set_layer_visibility
+   called   : fly_to_location({"query": "China", "viewMode": "overview"})  set_layer_visibility({"layerId": "local-dams", "enabled": true})
+   said     : Okay, I’ll fly to China and then enable the dams layer for you. The dams layer is on, and the move to China is still in progress. The dams layer is enabled.
+
+────────────────────────────────────────────────────────────────────────
+15. "What is the most significant dam we should check out in China?"
+   expected : spoken-answer
+   called   : (none)
+   said     : I can’t run a “most significant” ranking for dams with the analysis tool that’s available here. If you want, I can fly you to a well-known site like Three Gorges Dam so you can inspect it directly.
+
+────────────────────────────────────────────────────────────────────────
+16. "Take me to the most mountainous region in the world."
+   expected : fly_to_location
+   called   : fly_to_location({"query":"Himalayas","viewMode":"overview"})
+   said     : I’ll take you to the Himalayas for a high mountain panorama. You’re now over the Himalayas, the world’s highest mountain range.
+   network  : HTTP 502 https://gods-eye-view-808373260790.us-central1.run.app/api/terrain/heights?points=-158.15400%2C21.64000%3B-152.10800%2C5
+   network  : console: Failed to load resource: the server responded with a status of 502 ()
+
+────────────────────────────────────────────────────────────────────────
