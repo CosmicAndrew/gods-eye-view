@@ -1062,7 +1062,12 @@ export class GevRealtimeController {
     if (payload.type === 'input_audio_buffer.speech_started') {
       this.userTurnPending = true;
       this.pendingResponseInstructions = null;
-      this.cancelRadioHandoff({ abortTools: true });
+      // Barge-in aborts only RADIO tools, not every in-flight tool. A stale
+      // station must not start playing once the user has moved on (playback
+      // safety), but an annotation, route, or navigation the user already asked
+      // for must be allowed to finish — aborting those on any continued speech
+      // ("annotate X … okay … cool") is what made commands silently not happen.
+      this.cancelRadioHandoff({ abortRadioSiblings: true });
       this.setVoiceSpeaker('user');
     }
     this.updateResponseState(payload);

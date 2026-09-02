@@ -681,6 +681,39 @@ test('a Radio tool result that resolves after speech interruption cannot re-arm 
   assert.equal(sent.some((message) => message.type === 'response.create'), false);
 });
 
+test('barge-in keeps a non-radio command running (annotate survives continued speech)', async () => {
+  // A user who keeps talking - "annotate X ... okay ... cool" - must not have
+  // their already-issued command aborted. Radio playback still aborts on
+  // barge-in (a stale station must not start); annotate/nav/route do not, since
+  // they carry no such hazard and are what the user asked for.
+  let receivedSignal = null;
+  const runnerResult = new Promise(() => {}); // never resolves - stays in flight
+  const ui = {
+    root: { dataset: {}, classList: { remove() {} }, querySelectorAll: () => [] },
+    status: { textContent: '' }, detail: { textContent: '', title: '' }, errorDetail: { textContent: '' },
+  };
+  const controller = new GevRealtimeController({
+    ui,
+    runner: async (_name, _args, options) => { receivedSignal = options.signal; return runnerResult; },
+    radioLayer: { setVoiceDucked() {}, pause: () => false, stopPlayback() {} },
+  });
+  controller.debugLog = () => {};
+  controller.sendVisualContextIfUseful = async () => false;
+  controller.dc = { readyState: 'open', send() {}, close() {} };
+  const event = (payload) => ({ data: JSON.stringify(payload) });
+
+  controller.handleRealtimeEvent(event({
+    type: 'response.function_call_arguments.done',
+    response_id: 'response-annotate', call_id: 'annotate-call',
+    name: 'annotate_map', arguments: '{"annotations":[{"type":"area","target":"Presidio"}]}',
+  }));
+  await Promise.resolve();
+  assert.equal(receivedSignal?.aborted, false, 'the annotation is running');
+
+  await controller.handleRealtimeEvent(event({ type: 'input_audio_buffer.speech_started' }));
+  assert.equal(receivedSignal.aborted, false, 'barge-in must NOT abort a non-radio command');
+});
+
 test('sibling tool calls in one response do not abort an in-flight Radio action', async () => {
   let resolveRadio;
   let radioSignal = null;

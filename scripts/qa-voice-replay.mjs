@@ -56,6 +56,8 @@ const COMMANDS = [
     expect: ['fly_to_location', 'set_layer_visibility'] },
   { say: 'What is the most significant dam we should check out in China?',
     expect: ['spoken-answer'] },
+  { say: 'Turn on the radio.',
+    expect: ['control_radio'], state: 'radioEnabled' },
   { say: 'Take me to the most mountainous region in the world.',
     expect: ['fly_to_location'] },
 ];
@@ -180,7 +182,15 @@ try {
     console.log(`\n${'─'.repeat(72)}`);
     console.log(`${i + 1}. "${cmd.say}"`);
     console.log(`   expected : ${cmd.expect.join(' + ')}`);
+    const world = await page.evaluate(() => {
+      const g = window.__godsEyeView;
+      const radio = g?.dataManager?.layers?.get?.('radio')?.module?.getUIState?.() || {};
+      const cam = g?.viewer?.camera?.positionCartographic;
+      return { radioEnabled: radio.enabled ?? null, camH: Math.round(cam?.height || 0),
+        anns: g?.annotations?.count?.() ?? g?.annotations?.list?.()?.length ?? null };
+    }).catch(() => null);
     console.log(`   called   : ${turn.calls.length ? turn.calls.join('  ') : '(none)'}`);
+    if (world) console.log(`   world    : radioEnabled=${world.radioEnabled} camH=${world.camH} anns=${world.anns}`);
     console.log(`   said     : ${turn.said || '(nothing)'}`);
     if (turn.errors.length) console.log(`   errors   : ${turn.errors.join('; ')}`);
     const seen = [...new Set(net)];
