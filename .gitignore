@@ -10,6 +10,8 @@ output/
 .DS_Store
 .gstack/
 3d-models/
+pinokio/ENVIRONMENT
+pinokio/.installed
 
 # harness: ephemeral workbench (_shared/METHODOLOGY.md)
 .tmp/

@@ -77,6 +77,12 @@ COPY --from=build /app/index.html ./index.html
 COPY --from=build /app/src ./src
 COPY --from=build /app/config ./config
 COPY --from=build /app/public ./public
+# vite.config.js imports this at boot (upstream's Pinokio launcher reads the
+# environment file through it). Copying the one module rather than all of
+# scripts/ keeps the QA harnesses and their Puppeteer assumptions out of the
+# image. src/server/dockerRuntimeImports.test.mjs fails if another such import
+# is added without a COPY.
+COPY --from=build /app/scripts/pinokio-environment.mjs ./scripts/pinokio-environment.mjs
 
 # Seed the proxy's disk cache with orbital elements. celestrak.org is globally
 # unreachable and has no working mirror, so a fresh container answered every
