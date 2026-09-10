@@ -106,10 +106,10 @@ serving, records ten packages loading and neither Cesium package among them.
 
 | Image | Compressed layers + config |
 |---|---|
-| v13, before | 147,906,297 B (147.7 MB) |
+| v13, before | 154,906,297 B (147.7 MB) |
 | v14, after | 122,759,477 B (117.1 MB) |
 
-**30.6 MB smaller, ~21%.** On a service that scales to zero, image size is
+**30.7 MB smaller, 20.8%.** On a service that scales to zero, image size is
 startup latency: every first visit after an idle period pays a full pull.
 
 Cold start itself is **not measured here**. Samples taken right after the deploy
