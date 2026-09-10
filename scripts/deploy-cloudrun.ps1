@@ -18,7 +18,7 @@ param(
   [string]$Project = 'project-494b9eee-ced6-4525-aa8',
   [string]$Region  = 'us-central1',
   [string]$Service = 'gods-eye-view',
-  [string]$Image   = 'us-central1-docker.pkg.dev/project-494b9eee-ced6-4525-aa8/gev/gods-eye-view:v1'
+  [string]$Image   = 'us-central1-docker.pkg.dev/project-494b9eee-ced6-4525-aa8/gev/gods-eye-view:v14'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -63,6 +63,7 @@ gcloud run deploy $Service `
   --min-instances 0 `
   --max-instances 3 `
   --timeout 300 `
+  --cpu-boost `
   --set-env-vars $envArg `
   --quiet
 if ($LASTEXITCODE -ne 0) { throw "gcloud run deploy failed ($LASTEXITCODE)" }
