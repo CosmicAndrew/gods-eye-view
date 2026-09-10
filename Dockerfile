@@ -43,6 +43,13 @@ ENV GOOGLE_MAPS_API_KEY=$GOOGLE_MAPS_API_KEY \
     CESIUM_ION_TOKEN=$CESIUM_ION_TOKEN
 RUN npm run build
 
+# cesium + @cesium are 102 MB and build-time only: vite-plugin-cesium copies the
+# engine into dist/ during `npm run build`, and nothing imports them afterwards.
+# Traced at preview boot with a module resolve hook, server up and serving: ten
+# packages load - vite, rollup, esbuild, serve-static, vite-plugin-cesium,
+# fs-extra, fdir, picomatch, tinyglobby - and neither cesium package is among
+# them. Removing them AFTER the build leaves dist/cesium intact.
+#
 # Drop the QA-only packages by name rather than pruning devDependencies.
 # `npm ci --omit=dev` removes vite too - vite IS the runtime here, it serves the
 # app and hosts every /api route - and reinstalling it under NODE_ENV=production
@@ -57,6 +64,8 @@ RUN rm -rf \
       node_modules/@img \
       node_modules/chromium-bidi \
       node_modules/devtools-protocol \
+      node_modules/cesium \
+      node_modules/@cesium \
  && npm cache clean --force
 
 # ── runtime stage ─────────────────────────────────────────────────────────────

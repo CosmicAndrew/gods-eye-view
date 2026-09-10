@@ -6,3 +6,13 @@ dist
 qa-shots
 docs/media
 *.log
+
+# Unit tests never run inside the image. 181 files, 2.6 MB, shipped until now
+# only because the runtime stage copies src/ wholesale.
+src/**/*.test.mjs
+
+# Local-only working material, not part of the app or its build.
+four-brothers-out
+memory
+tools
+docs
