@@ -96,3 +96,24 @@ Hashed assets also carry `Cache-Control: public, max-age=31536000, immutable`.
 A middleware to force a compressible content type on `.geojsonl` was planned and
 then **not written**, because the measurement showed it would have changed
 nothing.
+
+## Image size and cold start
+
+The runtime image carried `node_modules/cesium` and `node_modules/@cesium` —
+102 MB of a 148 MB `node_modules` — despite nothing importing them after the
+build. A module resolve hook around `vite preview`, with the server up and
+serving, records ten packages loading and neither Cesium package among them.
+
+| Image | Compressed layers + config |
+|---|---|
+| v13, before | 147,906,297 B (147.7 MB) |
+| v14, after | 122,759,477 B (117.1 MB) |
+
+**30.6 MB smaller, ~21%.** On a service that scales to zero, image size is
+startup latency: every first visit after an idle period pays a full pull.
+
+Cold start itself is **not measured here**. Samples taken right after the deploy
+read 107-143 ms time-to-first-byte, but the deploy had already warmed the
+instance, so they are warm numbers and are recorded as such. A real figure needs
+a genuine scale-to-zero window (20+ minutes idle) or Cloud Monitoring's
+`run.googleapis.com/container/startup_latencies`.

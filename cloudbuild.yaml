@@ -1,6 +1,11 @@
 # Build the image on Cloud Build rather than pushing one from a workstation:
-# the image is ~900MB and a local `docker push` fails on a slow uplink
-# (TLS handshake timeout). This uploads ~20MB of source instead.
+# a local `docker push` fails on a slow uplink (TLS handshake timeout). This
+# uploads a few MB of source instead.
+#
+# Measured compressed size (registry manifest, layers + config):
+#   v13  147.7 MB   before pruning build-only Cesium
+#   v14  117.1 MB   after
+# The older "~900MB" note here was an estimate, never a measurement.
 #
 # GOOGLE_MAPS_API_KEY is a BUILD argument, not a runtime variable: vite's
 # `define` bakes it into the browser bundle, so supplying it at runtime only
