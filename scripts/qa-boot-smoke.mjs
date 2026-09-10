@@ -65,7 +65,7 @@ try {
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
   const viewerReady = await page
-    .waitForFunction(() => Boolean(window.viewer?.scene) || Boolean(document.querySelector('.cesium-widget canvas')), { timeout: 60000 })
+    .waitForFunction(() => Boolean(window.__godsEyeView?.viewer?.scene) || Boolean(document.querySelector('.cesium-widget canvas')), { timeout: 60000 })
     .then(() => true)
     .catch(() => false);
   const readyMs = Date.now() - started;
@@ -84,8 +84,8 @@ try {
       voiceControl: Boolean(document.getElementById('gev-voice-control')),
       voiceButton: Boolean(document.getElementById('gev-voice-button')),
       voiceStatus: document.getElementById('gev-voice-status')?.textContent?.trim() ?? null,
-      primitives: window.viewer?.scene?.primitives?.length ?? null,
-      entities: window.viewer?.entities?.values?.length ?? null,
+      primitives: window.__godsEyeView?.viewer?.scene?.primitives?.length ?? null,
+      entities: window.__godsEyeView?.viewer?.entities?.values?.length ?? null,
     };
   });
 

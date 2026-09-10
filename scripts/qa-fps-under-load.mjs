@@ -65,7 +65,12 @@ try {
 
   // Sample frame intervals while the camera is actually moving.
   const stats = await page.evaluate(() => new Promise((resolve) => {
-    const cam = window.viewer?.camera;
+    const cam = window.__godsEyeView?.viewer?.camera;
+    // A parked run must fail, never report. This harness used to read a bare
+    // viewer global that the app never assigned, so the optional call below
+    // was a no-op and every "under load" number was sampled on a motionless
+    // camera — a measurement of the wrong thing, reported with confidence.
+    if (!cam?.rotateRight) throw new Error("viewer camera unavailable — refusing to report a parked frame rate");
     const gaps = [];
     let last = performance.now();
     const t0 = last;
@@ -73,7 +78,7 @@ try {
       const now = performance.now();
       gaps.push(now - last);
       last = now;
-      cam?.rotateRight?.(0.002);
+      cam.rotateRight(0.002);
       if (now - t0 < 8000) requestAnimationFrame(tick);
       else {
         gaps.sort((a, b) => a - b);
