@@ -19,7 +19,16 @@ test('CCTV upstream frame fetch supplies a bounded abort signal', async () => {
   assert.equal(result, null);
   assert.ok(observedSignal instanceof AbortSignal);
   assert.equal(observedSignal.aborted, true);
-  assert.ok(Date.now() - startedAt < 500, 'test timeout should settle promptly');
+  // The bound exists to catch "the caller's timeoutMs was ignored and the 8s
+  // production default used instead", so it only has to sit below 8000. It was
+  // 500, which is 25x the requested 20ms and still not enough: under a full
+  // parallel suite the event loop starves and this measured 1382ms on a run
+  // where the code was correct. A wall-clock assertion on a loaded machine
+  // measures contention, not the code — give it room while keeping its teeth.
+  assert.ok(
+    Date.now() - startedAt < 4000,
+    'the requested timeout was ignored — settling took longer than any scheduling delay explains',
+  );
   assert.ok(CCTV_FRAME_FETCH_TIMEOUT_MS < 10_000, 'production timeout must beat the active refresh cadence');
 });
 

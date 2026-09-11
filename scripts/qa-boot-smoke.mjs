@@ -86,6 +86,13 @@ try {
       voiceStatus: document.getElementById('gev-voice-status')?.textContent?.trim() ?? null,
       primitives: window.__godsEyeView?.viewer?.scene?.primitives?.length ?? null,
       entities: window.__godsEyeView?.viewer?.entities?.values?.length ?? null,
+      // Which globe is actually on screen. Keyless boot falls back to Esri
+      // imagery rather than throwing when the baked Google key is missing or
+      // rejected, so a build with no key still boots, still passes every other
+      // check here, and renders a completely different scene. Without this a
+      // frame-rate or layer run can compare two different maps and call it a
+      // regression.
+      mapStack: window.__godsEyeView?.mapStackController?.getState?.()?.activeId ?? null,
     };
   });
 
@@ -104,6 +111,17 @@ try {
     failedRequests: [...new Set(failedRequests)].slice(0, 15),
     badResponses: [...new Set(badResponses)].slice(0, 20),
   }, null, 2));
+
+  // Not a failure — keyless boot is a supported mode upstream — but it must be
+  // impossible to miss, because every other line of this report looks healthy
+  // while the globe on screen is not the one the deployment ships.
+  if (state.mapStack && state.mapStack !== 'photoreal') {
+    console.error(
+      `[warn] map stack is "${state.mapStack}", not "photoreal": the Google 3D tileset did not load.\n`
+      + '       The app booted on fallback imagery, so any frame-rate or layer number from this\n'
+      + '       run describes a different scene and must not be compared with a photoreal run.',
+    );
+  }
 
   process.exitCode = viewerReady && pageErrors.length === 0 ? 0 : 1;
 } finally {
