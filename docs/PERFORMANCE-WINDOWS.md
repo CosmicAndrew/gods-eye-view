@@ -112,8 +112,18 @@ serving, records ten packages loading and neither Cesium package among them.
 **30.7 MB smaller, 20.8%.** On a service that scales to zero, image size is
 startup latency: every first visit after an idle period pays a full pull.
 
-Cold start itself is **not measured here**. Samples taken right after the deploy
-read 107-143 ms time-to-first-byte, but the deploy had already warmed the
-instance, so they are warm numbers and are recorded as such. A real figure needs
-a genuine scale-to-zero window (20+ minutes idle) or Cloud Monitoring's
-`run.googleapis.com/container/startup_latencies`.
+Cold start, measured on v14 after a genuine overnight scale-to-zero window:
+
+| Hit | Time to first byte |
+|---|---|
+| 1st, cold (image pull + Node boot + config evaluation) | **2.55 s** |
+| 2nd, warm | 0.49 s |
+| 3rd, warm | 0.23 s |
+
+So an idle-period visitor waits about **2.5 seconds** for the first byte, and
+roughly a quarter second thereafter. There is **no before/after comparison**:
+v13's cold start was never measured, so the prune's effect on this number is
+unknown rather than zero. What is known is the input — 30.7 MB less to pull.
+
+Eliminating the cold start entirely means keeping an instance warm, which is a
+standing cost (~$10-15/month) and was declined in favour of a smaller image.
