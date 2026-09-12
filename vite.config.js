@@ -2610,7 +2610,16 @@ export async function fetchOverpassPayload(body, maxResponseBytes = OVERPASS_MAX
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': 'gods-eye-view-overpass-proxy/1.0',
+          // No "proxy" in this string, and a contact URL, matching the
+          // celestrak proxy above. overpass-api.de's Apache refuses some agent
+          // strings with 406 before parsing the query at all: measured against
+          // the live mirror with one identical request, both
+          // "gods-eye-view-overpass-proxy/1.0" spellings were refused while
+          // this form and a plain "curl/8.0" were served. That refusal cost two
+          // of the four mirrors (lz4 is the same operator) and left the fan-out
+          // depending on a community mirror answering in ~21s against the 22s
+          // budget below — which is why area outlines so often never arrived.
+          'User-Agent': 'gods-eye-view/1.0 (+https://github.com/bilawalsidhu/gods-eye-view)',
         },
         body,
         signal: controller.signal,

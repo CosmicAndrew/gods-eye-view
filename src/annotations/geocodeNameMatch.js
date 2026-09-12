@@ -41,7 +41,41 @@ const tokens = (value) => normalize(value).split(' ').filter(Boolean);
  * @returns {boolean} true when the result is an unambiguous echo of the ask and
  *   may skip the proximity gate; false whenever the gate should still apply.
  */
+/**
+ * The locality the ask names for itself, if any: "Presidio, San Francisco" or
+ * "the Presidio in San Francisco". Returns the ask with that qualifier removed,
+ * or null when the ask carries none.
+ */
+function askWithoutLocality(query) {
+  const raw = String(query ?? '').trim();
+  if (!raw) return null;
+  const comma = raw.lastIndexOf(',');
+  if (comma > 0) return raw.slice(0, comma);
+  const inMatch = raw.match(/^(.*\S)\s+in\s+\S.*$/i);
+  return inMatch ? inMatch[1] : null;
+}
+
 export function geocodeNameConfidentlyMatches(query, primaryName, types = []) {
+  // An ask that names its own locality has already answered the question the
+  // proximity gate exists to ask. The gate is a stand-in for "roughly where are
+  // we" — when the user says "Presidio, San Francisco" the camera has nothing
+  // to add, and refusing costs them the request: measured, that exact ask from
+  // a camera over Austin was refused as 2431km drift, while the same words with
+  // the camera over San Francisco traced a 196-point perimeter.
+  //
+  // The geocoder must still have returned what was asked for. It may ADD detail
+  // ("Presidio" -> "Presidio of San Francisco"); it may not drop it, so
+  // "the Texas Capitol, Austin" -> "Texas" stays gated exactly as before.
+  const core = askWithoutLocality(query);
+  if (core) {
+    const coreTokens = tokens(core);
+    const gotTokens = tokens(primaryName);
+    if (coreTokens.length && gotTokens.length) {
+      const got = new Set(gotTokens);
+      if (coreTokens.every((token) => got.has(token))) return true;
+    }
+  }
+
   if (!Array.isArray(types) || !types.some((t) => UNAMBIGUOUS_TYPES.has(String(t)))) return false;
 
   // A bare code echoes the whole ask: "annotate LAX" against a geocoder result

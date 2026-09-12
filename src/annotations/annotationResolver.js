@@ -448,9 +448,15 @@ export async function resolveAnnotationTarget({
     if (!fp || !Array.isArray(fp.ring) || fp.ring.length < 3) return null;
     const centroid = ringCentroid(fp.ring);
     if (!centroid) return null;
-    // Same drift bound as the anchor gate: a polygon whose centroid would drag a good
-    // anchor out of plausibility is the wrong feature — drop it, keep the point.
-    if (fromGeocode && !bypassNearViewGuards && gateDrift(centroid.lat, centroid.lon)) return null;
+    // Same drift bound as the anchor gate, and the same bypasses — including
+    // echoesTheAsk. If the name was trusted enough to place the anchor at this
+    // distance, its own footprint cannot be too far away by the same measure:
+    // the two gates disagreeing is how "outline the Presidio" from a camera
+    // over Austin put a point on the map and silently dropped its perimeter.
+    // A polygon whose centroid would drag an UNtrusted anchor out of
+    // plausibility is still the wrong feature — drop it, keep the point.
+    if (fromGeocode && !bypassNearViewGuards && !echoesTheAsk
+      && gateDrift(centroid.lat, centroid.lon)) return null;
     return {
       ring: fp.ring,
       footprintKind: fp.kind,

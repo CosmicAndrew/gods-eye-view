@@ -72,6 +72,34 @@ test('a partial or wrong code does not match', () => {
   assert.equal(matches('SFO', 'Los Angeles International Airport (LAX)', AIRPORT), false);
 });
 
+test('an ask that names its own locality is self-disambiguating', () => {
+  // The gate stands in for "where are we, roughly". When the ask CARRIES a
+  // locality the user has already answered that, so the camera has nothing to
+  // add. Measured: "outline the Presidio" from a camera over Austin was refused
+  // outright ("could not resolve location", 2431km > 50km) while the identical
+  // request with the camera over San Francisco traced a 196-point perimeter.
+  assert.equal(matches('Presidio, San Francisco', 'Presidio of San Francisco', ['park']), true);
+  assert.equal(matches('Golden Gate Park, San Francisco', 'Golden Gate Park', ['park']), true);
+  assert.equal(matches('Palace of Fine Arts, San Francisco', 'Palace of Fine Arts', ['tourist_attraction']), true);
+  assert.equal(matches('the Pentagon, Arlington', 'The Pentagon', ['premise']), true);
+});
+
+test('an unqualified ask still leans on the viewport', () => {
+  // No locality in the ask = the gate is the only disambiguator left, so the
+  // pre-existing guarded cases must not move.
+  assert.equal(matches('Empire State', 'Empire State', ['premise', 'tourist_attraction']), false);
+  assert.equal(matches('Ohio State', 'Ohio State', ['university']), false);
+  assert.equal(matches('the Texas Capitol', 'Texas', ['administrative_area_level_1']), false);
+  assert.equal(matches('Chinatown', 'Chinatown', ['neighborhood']), false);
+});
+
+test('a locality qualifier does not excuse a name that missed', () => {
+  // Qualified or not, the geocoder still has to have returned the thing asked
+  // for — "the Texas Capitol, Austin" coming back as the STATE stays gated.
+  assert.equal(matches('the Texas Capitol, Austin', 'Texas', ['administrative_area_level_1']), false);
+  assert.equal(matches('Zilker Park, Austin', 'Lady Bird Lake', ['park']), false);
+});
+
 test('unrelated names never match', () => {
   assert.equal(matches('Los Angeles International Airport', 'Denver International Airport', AIRPORT), false);
   assert.equal(matches('Zilker Park', 'Lady Bird Lake', AIRPORT), false);
