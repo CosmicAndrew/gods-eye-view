@@ -176,9 +176,22 @@ export function createScreenAnnotationRenderer(viewer, {
       parts.label = makeCallout(anno.label, c);
       if (parts.label) group.appendChild(parts.label.node);
     } else {
-      // pin / highlight / label — pulsing target rings + a marker dot + callout
+      // pin / highlight / label — a marker dot + callout, and a ring whose
+      // behaviour is what separates the three. The schema sells them as
+      // different objects ("pin = planted marker at a spot; highlight = pulsing
+      // ring drawing the eye to a point") and the model chooses between them on
+      // that description, so they have to actually differ:
+      //   highlight  pulsing beacon ring — the attention-getter
+      //   pin        the same ring, steady — planted, definite, does not throb
+      //   label      no ring at all — caption only
+      // Sharing one throbbing ring made "highlight that one" a no-op on screen.
       if (anno.type !== 'label') {
-        parts.ringOuter = svgEl('circle', { class: 'gev-anno-ring gev-pulse', fill: 'none', stroke: c, 'stroke-width': '2', r: '34' });
+        const beacon = anno.type === 'highlight';
+        parts.ringOuter = svgEl('circle', {
+          class: `gev-anno-ring${beacon ? ' gev-pulse' : ''}`,
+          fill: 'none', stroke: c, 'stroke-width': '2',
+          'stroke-opacity': beacon ? '1' : '0.55', r: '34',
+        });
         parts.ringInner = svgEl('circle', { class: 'gev-anno-ring', fill: c, 'fill-opacity': '0.12', stroke: c, 'stroke-width': '2.5', r: '18', filter: 'url(#gev-sketch)' });
         group.appendChild(parts.ringOuter);
         group.appendChild(parts.ringInner);

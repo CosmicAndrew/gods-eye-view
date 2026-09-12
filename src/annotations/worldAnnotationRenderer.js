@@ -196,7 +196,13 @@ export function createWorldAnnotationRenderer(viewer) {
       }
     } else {
       // pin / highlight / label — a camera-proportional target ring + a marker.
+      // Only the highlight pulses: the schema calls it "a pulsing ring drawing
+      // the eye", against a pin's "planted marker at a spot". A pin keeps the
+      // ring (it needs presence at altitude) but holds it steady and slightly
+      // fainter, so the two read as different objects at every camera height
+      // instead of the identical throb they used to share.
       if (anno.type !== 'label') {
+        const beacon = anno.type === 'highlight';
         // Radius scales with camera height so the ring reads at any altitude.
         // semiMajor === semiMinor is required AND must hold every frame, so both
         // axes read the SAME ringRadius() (camera height is constant per frame).
@@ -205,7 +211,9 @@ export function createWorldAnnotationRenderer(viewer) {
           ellipse: {
             semiMajorAxis: new Cesium.CallbackProperty(ringRadius, false),
             semiMinorAxis: new Cesium.CallbackProperty(ringRadius, false),
-            material: new Cesium.ColorMaterialProperty(liveColor(anno, base, { alpha: 0.38, pulse: true })),
+            material: new Cesium.ColorMaterialProperty(
+              liveColor(anno, base, { alpha: beacon ? 0.38 : 0.26, pulse: beacon }),
+            ),
             outline: false,
             classificationType: CLASSIFY,
           },
