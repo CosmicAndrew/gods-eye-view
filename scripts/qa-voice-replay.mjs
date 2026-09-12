@@ -56,6 +56,8 @@ const COMMANDS = [
     expect: ['fly_to_location', 'set_layer_visibility'] },
   { say: 'What is the most significant dam we should check out in China?',
     expect: ['spoken-answer'] },
+  { say: 'Mark the port of Rotterdam and the port of Antwerp, and outline Golden Gate Park in San Francisco.',
+    expect: ['annotate_map'] },
   { say: 'Turn on the radio.',
     expect: ['control_radio'], state: 'radioEnabled' },
   { say: 'Take me to the most mountainous region in the world.',
@@ -172,7 +174,7 @@ try {
       const events = window.__gevEvents.slice(from);
       return {
         calls: events.filter((e) => e.type === 'response.function_call_arguments.done')
-          .map((e) => `${e.name}(${(e.arguments || '').replace(/\s+/g, ' ').slice(0, 70)})`),
+          .map((e) => `${e.name}(${(e.arguments || '').replace(/\s+/g, ' ').slice(0, 400)})`),
         said: events.filter((e) => e.type === 'response.output_audio_transcript.done')
           .map((e) => e.transcript).join(' ').trim(),
         errors: events.filter((e) => e.type === 'error').map((e) => e.error?.message || 'error'),
