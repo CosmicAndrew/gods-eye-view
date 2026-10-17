@@ -14,3 +14,10 @@
   dropping build-only Cesium from the runtime stage. Windows numbers now in
   docs/PERFORMANCE-WINDOWS.md; the RTX column is empty because the GPU is at
   problem code 43 and needs a full power-down.
+
+- 2026-10-16 — Merged upstream main 3e5a18f6 (1,387 commits, v0.2.1+: provider split into
+  server/ and build/, MCP, i18n, CCTV/transit/radar packs, web manifest) into a merge branch off
+  feat/windows-preview-parity; tag pre-upstream-merge-2026-10-16 is the revert point. Upstream
+  dissolved vite.config.js, so our fixes were re-applied at their new homes rather than merged by
+  line. Our Cloud Run image moved to Dockerfile.cloudrun (upstream now owns Dockerfile for compose).
+  7783 tests, 0 fail. NOT deployed: GEV_ALLOWED_HOSTS on Cloud Run must change first (task_plan).

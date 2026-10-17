@@ -45,6 +45,19 @@ test('the auth gate is still the first plugin', () => {
   // Everything behind it - assets carrying the baked Maps key, the proxies, the
   // OpenAI token minter - is reachable unauthenticated if it ever slips.
   assert.equal(plugins[0]?.name, 'basic-auth-gate');
+  // Vite runs every `enforce: 'pre'` plugin before unmarked ones regardless of
+  // array position, and upstream's Host check is one. Unmarked, the gate would
+  // be first in the array and still run second.
+  assert.equal(plugins[0].enforce, 'pre');
+  const pre = plugins.filter((plugin) => plugin?.enforce === 'pre');
+  assert.equal(pre[0]?.name, 'basic-auth-gate');
+});
+
+test("preview binds the platform PORT, not Vite's 4173 default", () => {
+  // Vite inherits preview.host from server.host but never preview.port, so
+  // without this Cloud Run's PORT=8080 binds nothing.
+  assert.equal(config.preview?.port, config.server?.port);
+  assert.equal(config.preview?.host, config.server?.host);
 });
 
 test('the key-setup endpoint never reaches the preview server', () => {
@@ -64,7 +77,9 @@ test('preview sends the same anti-framing headers as dev', () => {
   // Upstream added these to `server`, which only covers `npm run dev`. This
   // deployment runs `vite preview`, so without mirroring them the live site is
   // the one surface left framable.
+  // Upstream now ships one shared BROWSER_HEADERS constant with a full CSP;
+  // what this fork needs from it is that frame-ancestors stays 'none'.
   assert.equal(config.preview?.headers?.['X-Frame-Options'], 'DENY');
-  assert.equal(config.preview.headers['Content-Security-Policy'], "frame-ancestors 'none'");
+  assert.match(config.preview.headers['Content-Security-Policy'], /(?:^|; )frame-ancestors 'none'(?:;|$)/);
   assert.deepEqual(config.preview.headers, config.server?.headers);
 });

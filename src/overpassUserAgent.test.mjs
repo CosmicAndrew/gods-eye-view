@@ -27,15 +27,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const config = readFileSync(path.join(repoRoot, 'vite.config.js'), 'utf8');
+const read = (rel) => readFileSync(path.join(repoRoot, rel), 'utf8');
 
 /** The User-Agent the Overpass fan-out sends upstream. */
 function overpassUserAgent() {
-  const start = config.indexOf('export async function fetchOverpassPayload');
-  assert.notEqual(start, -1, 'fetchOverpassPayload not found — did the proxy move?');
-  const block = config.slice(start, start + 4000);
-  const match = block.match(/'User-Agent':\s*'([^']+)'/);
-  assert.ok(match, 'no User-Agent header in the Overpass fan-out');
+  // Upstream split the proxy: transport.js sends OVERPASS_USER_AGENT, which
+  // constants.js defines. Upstream adopted the same no-"proxy" form itself.
+  const transport = read('server/providers/overpass/transport.js');
+  assert.match(transport, /'User-Agent':\s*OVERPASS_USER_AGENT/, 'the fan-out no longer sends the shared constant');
+  const match = read('server/providers/overpass/constants.js')
+    .match(/const OVERPASS_USER_AGENT =\s*'([^']+)'/);
+  assert.ok(match, 'OVERPASS_USER_AGENT not found — did the proxy move?');
   return match[1];
 }
 
@@ -56,7 +58,8 @@ test('the Overpass User-Agent carries a contact URL, as OSM etiquette asks', () 
 
 test('the celestrak proxy keeps the same convention', () => {
   // The form being copied here, so the two cannot drift apart unnoticed.
-  const match = config.match(/'User-Agent':\s*'(gods-eye-view-celestrak[^']+)'/);
+  const match = read('server/providers/space/celestrak.js')
+    .match(/'User-Agent':\s*'(gods-eye-view-celestrak[^']+)'/);
   assert.ok(match, 'celestrak User-Agent not found');
   assert.match(match[1], /\(\+https:\/\/\S+\)/);
 });

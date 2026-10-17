@@ -42,9 +42,20 @@ foreach ($required in @('GEV_AUTH_USER', 'GEV_AUTH_PASSWORD', 'GOOGLE_MAPS_API_K
   if (-not $vars[$required]) { throw "$required missing from .env - without the auth pair the deploy is PUBLIC." }
 }
 
-# Any Cloud Run URL, so the service works before its hostname is known. Vite
-# rejects unknown Host headers, which presents as a blank page on a healthy server.
-$vars['GEV_ALLOWED_HOSTS'] = '.run.app'
+# Exact hostnames, read from the service's own URLs. Vite rejects unknown Host
+# headers, and upstream's Host check (build/allowedHosts.js) drops suffix
+# entries such as '.run.app' as a DNS-rebinding defense - a wildcard here
+# allows nothing and every request is a 403. A first-ever deploy has no URLs
+# yet: deploy once, then rerun this so the hosts are filled in.
+$described = gcloud run services describe $Service --project $Project --region $Region --format=json 2>$null
+$serviceHosts = @()
+if ($LASTEXITCODE -eq 0 -and $described) {
+  $urlsJson = ($described | Out-String | ConvertFrom-Json).metadata.annotations.'run.googleapis.com/urls'
+  if ($urlsJson) { $serviceHosts = @($urlsJson | ConvertFrom-Json | ForEach-Object { ([uri]$_).Host }) }
+}
+if (-not $serviceHosts) { Write-Warning "No existing URLs for $Service; rerun after this first deploy to allow its hostnames." }
+$vars['GEV_ALLOWED_HOSTS'] = ($serviceHosts -join ',')
+if (-not $vars['GEV_ALLOWED_HOSTS']) { $vars.Remove('GEV_ALLOWED_HOSTS') }
 
 # `--env-vars-file` is not accepted by this gcloud's `run deploy`, so use the
 # ^DELIM^ form: values here contain commas, which the default separator splits.

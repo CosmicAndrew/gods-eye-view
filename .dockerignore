@@ -1,15 +1,35 @@
+# Keep keys and local state out of the build context: compose bind-mounts the
+# checkout at run time, so the image never needs them.
+.git
 node_modules
 dist
-.git
 .env
+.env.*
+!.env.example
+**/ENVIRONMENT
+pinokio/ENVIRONMENT
+pinokio/.installed
 .gev-cache
+.gev-logs
+qa-artifacts
 qa-shots
-docs/media
+screenshots
+output
+3d-models
+.gstack
 *.log
+.DS_Store
+# AppleDouble sidecars from a macOS `tar` copy; `npm test` would otherwise
+# collect `._*.test.mjs` as test files.
+._*
 
-# Unit tests never run inside the image. 181 files, 2.6 MB, shipped until now
-# only because the runtime stage copies src/ wholesale.
+# Fork additions for Dockerfile.cloudrun, which copies src/ and server/ into
+# the runtime image wholesale. Unit tests never run inside that image; compose
+# bind-mounts the real checkout, so the dev container keeps them too.
 src/**/*.test.mjs
+server/**/*.test.mjs
+build/**/*.test.mjs
+docs/media
 
 # Local-only working material, not part of the app or its build.
 four-brothers-out

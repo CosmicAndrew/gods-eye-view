@@ -8,7 +8,7 @@
  * claimed motion, and qa-boot-smoke.mjs reported `primitives: null` forever.
  * Every number those two produced under load was measuring the wrong thing.
  *
- * The app exposes `window.__godsEyeView` (src/main.js), which every other
+ * The app exposes `window.__godsEyeView` (src/app/tools.js), which every other
  * qa-*.mjs already uses. These anchors keep the harnesses pointed at it, and
  * keep a missing camera loud instead of silent.
  */
@@ -32,7 +32,8 @@ function block(source, startMarker, endMarker) {
 
 test('the app exposes the viewer on __godsEyeView', () => {
   // If this global is ever renamed, the harnesses below must move with it.
-  const exposed = block(read('src/main.js'), 'window.__godsEyeView = {', '};');
+  // Assigned in src/app/tools.js since upstream's application split.
+  const exposed = block(read('src/app/tools.js'), 'window.__godsEyeView = {', '};');
   assert.match(exposed, /^\s*viewer,/m);
 });
 

@@ -1,110 +1,45 @@
-# God's Eye View - container image for a private, password-gated deployment.
+# syntax=docker/dockerfile:1
 #
-# The app is served by `vite preview`, not a separate server: its entire API
-# surface (19 /api/* routes) is Vite plugin middleware defined in
-# vite.config.js. That is also why devDependencies are installed and kept -
-# vite itself is the runtime here, not just a build tool.
+# The dev server is the whole app: Vite serves the client AND runs the API
+# proxies (ADS-B, AIS, Overpass, OpenAI Realtime, ...) as middleware, so there
+# is nothing else to containerise. See compose.yaml for the usual entry point.
+# Same Node as CI (package.json engines, .github/workflows), pinned by digest.
+FROM node:24.14.0-slim@sha256:d8e448a56fc63242f70026718378bd4b00f8c82e78d20eefb199224a4d8e33d8
 
-# ── build stage ───────────────────────────────────────────────────────────────
-# Split from the runtime stage so puppeteer and sharp - devDependencies used
-# only by the scripts/qa-*.mjs harnesses - never reach the shipped image. On
-# Cloud Run the image is pulled before a cold instance can serve, so its size
-# is startup latency, not just disk.
-FROM node:24-slim AS build
+# Puppeteer is only used by the QA scripts; skip its ~150MB Chromium download.
+ENV PUPPETEER_SKIP_DOWNLOAD=1
 
-ENV PUPPETEER_SKIP_DOWNLOAD=true \
-    NODE_ENV=production \
-    CI=true
+# `npm test` builds fixtures with `git init`, so the suite cannot run in a
+# container without it (71 failures on node:24-slim, all ENOENT on git).
+RUN apt-get update   && apt-get install -y --no-install-recommends git   && rm -rf /var/lib/apt/lists/*
+# The repo is bind-mounted, so inside the container it can show an owner other
+# than the user the container runs as - always, on Docker Desktop. git then
+# refuses it as "dubious ownership", which fails the tests that shell out to
+# git. It is the user's own checkout, so trust that one path.
+RUN git config --system --add safe.directory /app
 
+# Never run as root. The image's own user is `node` (1000); compose overrides
+# it with the host user so bind-mounted files stay yours.
 WORKDIR /app
+RUN chown node:node /app
+USER node
 
-COPY package.json package-lock.json ./
-# `--include=dev` because NODE_ENV=production would otherwise omit vite, which
-# is the runtime here. The retry settings are not boilerplate: this install
-# pulls ~270 packages including Cesium, and a plain `npm ci` died on ECONNRESET
-# partway through on a flaky connection.
-RUN npm config set fetch-retries 5 \
- && npm config set fetch-retry-mintimeout 20000 \
- && npm config set fetch-retry-maxtimeout 120000 \
- && npm config set fetch-timeout 600000 \
- && npm ci --include=dev
+COPY --chown=node:node package.json package-lock.json ./
+RUN npm ci
+# node_modules belongs to `node`, but compose may run as another UID. Vite only
+# needs to write its dep-optimizer cache, so open up those two directories
+# rather than chowning a few hundred MB to a UID we cannot know at build time.
+RUN mkdir -p node_modules/.vite && chmod 777 node_modules node_modules/.vite
 
-COPY . .
+COPY --chown=node:node . .
 
-# GOOGLE_MAPS_API_KEY is injected into the browser bundle by vite's `define`,
-# so it has to exist at BUILD time - supplying it only at runtime yields an
-# image whose globe silently fails to authenticate. On Railway, set it as a
-# service variable and it is passed through as a build arg.
-# Note this bakes the key into an image layer: keep the image private, and
-# restrict the key to the deploy domain + the four APIs it needs.
-ARG GOOGLE_MAPS_API_KEY
-ARG CESIUM_ION_TOKEN
-ENV GOOGLE_MAPS_API_KEY=$GOOGLE_MAPS_API_KEY \
-    CESIUM_ION_TOKEN=$CESIUM_ION_TOKEN
-RUN npm run build
-
-# cesium + @cesium are 102 MB and build-time only: vite-plugin-cesium copies the
-# engine into dist/ during `npm run build`, and nothing imports them afterwards.
-# Traced at preview boot with a module resolve hook, server up and serving: ten
-# packages load - vite, rollup, esbuild, serve-static, vite-plugin-cesium,
-# fs-extra, fdir, picomatch, tinyglobby - and neither cesium package is among
-# them. Removing them AFTER the build leaves dist/cesium intact.
-#
-# Drop the QA-only packages by name rather than pruning devDependencies.
-# `npm ci --omit=dev` removes vite too - vite IS the runtime here, it serves the
-# app and hosts every /api route - and reinstalling it under NODE_ENV=production
-# does not bring it back, which fails the container at startup with
-# "Cannot find package 'vite'". puppeteer and sharp are the bulk of the weight
-# and are used only by scripts/qa-*.mjs, which never run in the image.
-RUN rm -rf \
-      node_modules/puppeteer \
-      node_modules/puppeteer-core \
-      node_modules/@puppeteer \
-      node_modules/sharp \
-      node_modules/@img \
-      node_modules/chromium-bidi \
-      node_modules/devtools-protocol \
-      node_modules/cesium \
-      node_modules/@cesium \
- && npm cache clean --force
-
-# ── runtime stage ─────────────────────────────────────────────────────────────
-FROM node:24-slim AS runtime
-
-ENV NODE_ENV=production \
-    HOST=0.0.0.0
-
-WORKDIR /app
-
-# vite.config.js imports from src/, so the source tree ships too - it is small
-# next to node_modules and is what defines the API surface.
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/package.json ./package.json
-COPY --from=build /app/vite.config.js ./vite.config.js
-COPY --from=build /app/index.html ./index.html
-COPY --from=build /app/src ./src
-COPY --from=build /app/config ./config
-COPY --from=build /app/public ./public
-# vite.config.js imports this at boot (upstream's Pinokio launcher reads the
-# environment file through it). Copying the one module rather than all of
-# scripts/ keeps the QA harnesses and their Puppeteer assumptions out of the
-# image. src/server/dockerRuntimeImports.test.mjs fails if another such import
-# is added without a COPY.
-COPY --from=build /app/scripts/pinokio-environment.mjs ./scripts/pinokio-environment.mjs
-
-# Seed the proxy's disk cache with orbital elements. celestrak.org is globally
-# unreachable and has no working mirror, so a fresh container answered every
-# /api/celestrak/* with 502 and the satellite layer rendered nothing - the
-# proxy serves stale on upstream failure, but had nothing stale to serve. The
-# moment celestrak answers again these are overwritten with fresh data. See
-# seed-cache/README.md.
-COPY --from=build /app/seed-cache/celestrak-*.json ./.gev-cache/
-
-# The port is read from $PORT at runtime (see the `preview` block in vite.config.js).
+# Bind to all interfaces, otherwise the published port hits nothing. This does
+# not widen the Host allowlist: IP addresses and localhost are accepted, other
+# names only via GEV_ALLOWED_HOSTS (see build/allowedHosts.js).
+ENV HOST=0.0.0.0
+ENV PORT=4173
 EXPOSE 4173
-
-# Exec vite directly rather than through `npx`. As PID 1, npx does not forward
-# SIGTERM to its child, so Cloud Run's shutdown signal never reaches the server
-# and every scale-down and deploy drops in-flight requests instead of draining.
-CMD ["node", "node_modules/vite/bin/vite.js", "preview"]
+# The launcher is `npm run dev` plus one step: it trusts the container's
+# gateway address for Provider Settings, because that is where Docker delivers
+# the host's own browser from (never 127.0.0.1). See scripts/docker-start.mjs.
+CMD ["node", "scripts/docker-start.mjs"]

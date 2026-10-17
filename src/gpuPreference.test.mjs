@@ -10,9 +10,10 @@ import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const mainSource = fs.readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+// Viewer construction moved from main.js to app/viewer.js upstream.
+const mainSource = fs.readFileSync(new URL('./app/viewer.js', import.meta.url), 'utf8');
 
-/** Slice main.js between two literal anchors, so a pin reads one call, not the file. */
+/** Slice app/viewer.js between two literal anchors, so a pin reads one call, not the file. */
 function block(start, end) {
   const from = mainSource.indexOf(start);
   assert.ok(from >= 0, `missing source anchor: ${start}`);

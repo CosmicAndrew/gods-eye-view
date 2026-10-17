@@ -5,8 +5,10 @@ metered API keys to the internet.
 
 ## Why a Node host, and not static hosting
 
-The app has no separate backend: all 19 `/api/*` routes are Vite plugin
-middleware in `vite.config.js`. So the deployment runs `vite preview`, and a
+The app has no separate backend: every `/api/*` route is Vite plugin
+middleware under `server/providers/`, composed by
+`server/standalone/vite.config.js` (the root `vite.config.js` re-exports it).
+So the deployment runs `vite preview`, and a
 static host (here.now, Netlify drop, S3, GitHub Pages) cannot serve it. On
 static hosting you would get the globe and the bundled datasets, and lose every
 live layer plus voice — `/api/realtime/token` mints the OpenAI session with the
@@ -14,11 +16,12 @@ server's own key, and there is no server to mint it.
 
 ## Two facts that decide the configuration
 
-**The Google key is a build-time input.** `vite.config.js` injects it into the
+**The Google key is a build-time input.** `build/vite.js` injects it into the
 browser bundle through `define`, so it must be present when `npm run build`
 runs. Supplying it only at runtime produces an image whose globe fails to
 authenticate, with no error beyond a 400 from `tile.googleapis.com`. The
-`Dockerfile` takes it as an `ARG` for exactly this reason.
+`Dockerfile.cloudrun` takes it as an `ARG` for exactly this reason. (The plain
+`Dockerfile` is upstream's compose dev container, not this deployment.)
 
 **The OpenAI key is runtime-only and must stay that way.** It never enters the
 bundle. Verify after any change:
@@ -46,7 +49,8 @@ Set the variables (Railway dashboard → Variables, or `railway variables --set`
 | `OPENSKY_AUTH_MODE` | recommended | `anon` — aircraft work keyless. |
 | `GEV_RATELIMIT_OPENAI_PER_MIN` | recommended | e.g. `30`. Per-IP, process-local; not a billing cap. |
 | `GEV_RATELIMIT_GOOGLE_PER_MIN` | recommended | e.g. `60`. |
-| `GEV_ALLOWED_HOSTS` | custom domain only | Comma-separated. `RAILWAY_PUBLIC_DOMAIN` is picked up automatically. |
+| `GEV_ALLOWED_HOSTS` | **yes** | Comma-separated **exact** hostnames. Upstream's Host check (`build/allowedHosts.js`) drops leading-dot and `*` entries as a DNS-rebinding defense, so `.run.app` allows nothing and every request is a 403. On Cloud Run list both service URLs: `gods-eye-view-808373260790.us-central1.run.app,gods-eye-view-b3toxongka-uc.a.run.app`. |
+| `GEV_TRUSTED_PROXY_HOPS` | Cloud Run | `1`. Without it every caller is Google's front end and all rate limits share one bucket. |
 | `CESIUM_ION_TOKEN`, `FIRMS_MAP_KEY`, `AISSTREAM_API_KEY`, `TOMTOM_API_KEY` | optional | Free tiers. Layers degrade gracefully without them. |
 
 Then:
@@ -56,7 +60,7 @@ railway up
 ```
 
 `HOST=0.0.0.0` is set in the image; `PORT` comes from the platform and is read
-by the `preview` block in `vite.config.js`.
+by the `preview` block in `server/standalone/vite.config.js`.
 
 > **No healthcheck path is configured on purpose.** With the auth gate armed,
 > every path including `/` answers `401`, so a healthcheck would mark a healthy
