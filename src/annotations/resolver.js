@@ -702,6 +702,7 @@ export function createAnnotationResolver({
       if (
         fromGeocode &&
         !bypassNearViewGuards &&
+        !allowDistant &&
         !echoesTheAsk &&
         gateDrift(centroid.lat, centroid.lon)
       )

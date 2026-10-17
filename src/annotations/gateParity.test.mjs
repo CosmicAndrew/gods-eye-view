@@ -40,7 +40,12 @@ test('both proximity gates exist', () => {
 
 test('both gates honour the same bypasses', () => {
   const [anchor, footprint] = gateLines().map((l) => l.trim());
-  for (const bypass of ['bypassNearViewGuards', 'echoesTheAsk']) {
+  // Read the bypasses off the anchor gate rather than listing them: upstream's
+  // allowDistant reached the anchor gate alone, the same split this test exists
+  // to catch, and a hardcoded list could not see it.
+  const bypasses = [...anchor.matchAll(/!(\w+)/g)].map((m) => m[1]);
+  assert.ok(bypasses.includes('echoesTheAsk'), `anchor gate parse drifted: ${anchor}`);
+  for (const bypass of bypasses) {
     assert.ok(anchor.includes(bypass), `anchor gate lost ${bypass}`);
     assert.ok(
       footprint.includes(bypass),

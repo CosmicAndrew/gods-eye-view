@@ -129,6 +129,10 @@ test('the installed keyless HUD route stays successful after the voice quota is 
   const previousLimit = process.env.GEV_RATELIMIT_OPENAI_PER_MIN;
   process.env.OPENAI_API_KEY = '';
   process.env.GEV_RATELIMIT_OPENAI_PER_MIN = '1';
+  // The HUD also falls back to these; a key in the shell would make it paid.
+  const fallbackKeys = ['GEMINI_API_KEY', 'DEEPSEEK_API_KEY', 'OPENROUTER_API_KEY'];
+  const previousFallbacks = fallbackKeys.map((name) => process.env[name]);
+  for (const name of fallbackKeys) delete process.env[name];
   try {
     const routes = installOpenAiRoutes();
     const token = routes.get('/api/realtime/token');
@@ -158,6 +162,9 @@ test('the installed keyless HUD route stays successful after the voice quota is 
     if (previousLimit === undefined)
       delete process.env.GEV_RATELIMIT_OPENAI_PER_MIN;
     else process.env.GEV_RATELIMIT_OPENAI_PER_MIN = previousLimit;
+    fallbackKeys.forEach((name, i) => {
+      if (previousFallbacks[i] !== undefined) process.env[name] = previousFallbacks[i];
+    });
   }
 });
 
