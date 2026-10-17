@@ -13,12 +13,26 @@ import { admitSameSiteRequest } from '../../../src/localRequestGate.mjs';
  * @returns {boolean} True when a 403 was sent.
  */
 export function admitSameSite(req, res) {
+  // GEV_TRUSTED_PROXY_HOPS declares a known front end (Cloud Run). Its
+  // forwarding headers are then expected on every request rather than a sign
+  // of a stray proxy, and the scheme the browser used is the forwarded one.
+  // The Origin and Sec-Fetch-Site checks still run either way.
+  const behindProxy = Number(process.env.GEV_TRUSTED_PROXY_HOPS) > 0;
+  const forwardedProto = String(req.headers?.['x-forwarded-proto'] || '')
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
   const verdict = admitSameSiteRequest({
     hostHeader: req.headers?.host,
-    protocol: req.socket?.encrypted ? 'https:' : 'http:',
+    protocol:
+      behindProxy && forwardedProto === 'https'
+        ? 'https:'
+        : req.socket?.encrypted
+          ? 'https:'
+          : 'http:',
     origin: req.headers?.origin,
     secFetchSite: req.headers?.['sec-fetch-site'],
-    proxyHeaders: req.headers || {},
+    proxyHeaders: behindProxy ? {} : req.headers || {},
   });
   if (verdict.ok) return false;
   res.statusCode = verdict.status;
