@@ -18,7 +18,7 @@ param(
   [string]$Project = 'project-494b9eee-ced6-4525-aa8',
   [string]$Region  = 'us-central1',
   [string]$Service = 'gods-eye-view',
-  [string]$Image   = 'us-central1-docker.pkg.dev/project-494b9eee-ced6-4525-aa8/gev/gods-eye-view:v14'
+  [string]$Image   = 'us-central1-docker.pkg.dev/project-494b9eee-ced6-4525-aa8/gev/gods-eye-view:v15'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,6 +36,14 @@ foreach ($line in Get-Content (Join-Path $repo '.env')) {
   $value = $line.Substring($i + 1).Trim()
   if (-not $name -or -not $value -or $skip -contains $name -or $value -like 'PASTE_YOUR*') { continue }
   $vars[$name] = $value
+}
+
+# HUD-summary fallback keys (server/providers/openai/hud-summary.js) live in the
+# Windows user environment rather than .env; carry them over without writing
+# them to a file. A value in .env still wins.
+foreach ($name in @('GEMINI_API_KEY', 'DEEPSEEK_API_KEY', 'OPENROUTER_API_KEY')) {
+  $value = [Environment]::GetEnvironmentVariable($name)
+  if (-not $vars[$name] -and $value) { $vars[$name] = $value }
 }
 
 foreach ($required in @('GEV_AUTH_USER', 'GEV_AUTH_PASSWORD', 'GOOGLE_MAPS_API_KEY')) {
