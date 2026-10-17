@@ -21,3 +21,9 @@
   dissolved vite.config.js, so our fixes were re-applied at their new homes rather than merged by
   line. Our Cloud Run image moved to Dockerfile.cloudrun (upstream now owns Dockerfile for compose).
   7783 tests, 0 fail. NOT deployed: GEV_ALLOWED_HOSTS on Cloud Run must change first (task_plan).
+
+## 2026-10-17 - v16 live (revision gods-eye-view-00018-mlh)
+- OpenAI key is 429 credit_balance_exhausted. HUD summary now falls back across Gemini, DeepSeek, OpenRouter (keys from the Windows user env, passed by deploy-cloudrun.ps1; order GEV_HUD_SUMMARY_PROVIDERS in .env). Voice is still OpenAI Realtime only.
+- Footprint gate now honours upstream's allowDistant (gateParity reads the bypass list off the anchor gate).
+- Merge regression found live on v15: upstream same-site gate 403'd every cost endpoint behind Cloud Run. Fixed in v16 behind GEV_TRUSTED_PROXY_HOPS.
+- Live checks: 401 unauthed, 200 authed on both hostnames, HUD summary 200 with text, realtime token 200, cross-site 403, setup/status 404.

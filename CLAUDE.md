@@ -55,7 +55,7 @@ name instead. Details: `docs/DEPLOY-PRIVATE.md`.
 Before changing a proxy, a layer, or the voice path: (1) route the task; (2) **RED** — a failing test
 that proves the gap (`src/viteProxyParity.test.mjs` is the model: it caught ten proxies that vanished
 from `vite preview`); (3) **GREEN** — minimal change; (4) **REFACTOR** — `npm test` green before and
-after; (5) log back. Baseline: **7783 tests, 0 fail, 10 skipped** (after the 2026-10-16 upstream merge). Measure before optimizing — `vite preview`
+after; (5) log back. Baseline: **7779 tests, 0 fail, 10 skipped** (2026-10-17; `mcpPanelKey` and `mapillaryProvider` concurrency tests are flaky upstream, ~1 in 6-8). Measure before optimizing — `vite preview`
 already gzips (1.35 MB → 417 KB) and `egm96-universal` is already lazy-imported.
 
 ## Memory ledgers (the capsule's brain)
