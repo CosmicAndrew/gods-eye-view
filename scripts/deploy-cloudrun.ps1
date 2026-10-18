@@ -18,7 +18,7 @@ param(
   [string]$Project = 'project-494b9eee-ced6-4525-aa8',
   [string]$Region  = 'us-central1',
   [string]$Service = 'gods-eye-view',
-  [string]$Image   = 'us-central1-docker.pkg.dev/project-494b9eee-ced6-4525-aa8/gev/gods-eye-view:v16'
+  [string]$Image   = 'us-central1-docker.pkg.dev/project-494b9eee-ced6-4525-aa8/gev/gods-eye-view:v17'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,6 +43,8 @@ foreach ($line in Get-Content (Join-Path $repo '.env')) {
 # them to a file. A value in .env still wins.
 foreach ($name in @('GEMINI_API_KEY', 'DEEPSEEK_API_KEY', 'OPENROUTER_API_KEY', 'GROQ_API_KEY', 'FISH_API_KEY', 'DEEPINFRA_API_KEY', 'FAL_KEY')) {
   $value = [Environment]::GetEnvironmentVariable($name)
+  # A shell opened before the key was set only sees it in the User scope.
+  if (-not $value) { $value = [Environment]::GetEnvironmentVariable($name, 'User') }
   if (-not $vars[$name] -and $value) { $vars[$name] = $value }
 }
 
