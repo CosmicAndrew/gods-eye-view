@@ -11,8 +11,8 @@ Windows/preview parity plus voice and layer fixes: **24 of 29 commits**, on
 
 ## Hazards specific to this repo — read before touching it
 
-1. **The branch is never pushed. `origin` is Bilawal's repo, not Andrew's.** Every local commit stays
-   local by decision. Do not `git push`; do not open a PR upstream unless Andrew says so.
+1. **`origin` is Bilawal's repo (read-only for Andrew).** The branch pushes only to Andrew's fork,
+   `https://github.com/CosmicAndrew/gods-eye-view.git`, when he asks. Never push or PR to origin unless he says so.
 2. **There is no conventional backend.** Every `/api/*` route is **Vite plugin middleware** under
    `server/providers/`, composed by `server/standalone/vite.config.js` (root `vite.config.js` is a
    re-export since the 2026-10-16 upstream merge). A static host (Vercel, Netlify, here.now) serves the globe and silently loses
@@ -55,7 +55,7 @@ name instead. Details: `docs/DEPLOY-PRIVATE.md`.
 Before changing a proxy, a layer, or the voice path: (1) route the task; (2) **RED** — a failing test
 that proves the gap (`src/viteProxyParity.test.mjs` is the model: it caught ten proxies that vanished
 from `vite preview`); (3) **GREEN** — minimal change; (4) **REFACTOR** — `npm test` green before and
-after; (5) log back. Baseline: **7779 tests, 0 fail, 10 skipped** (2026-10-17; `mcpPanelKey` and `mapillaryProvider` concurrency tests are flaky upstream, ~1 in 6-8). Measure before optimizing — `vite preview`
+after; (5) log back. Baseline: **7871 tests, 0 fail** (2026-10-18; `mcpPanelKey` and `mapillaryProvider` concurrency tests are flaky upstream, ~1 in 6-8). Measure before optimizing — `vite preview`
 already gzips (1.35 MB → 417 KB) and `egm96-universal` is already lazy-imported.
 
 ## Memory ledgers (the capsule's brain)

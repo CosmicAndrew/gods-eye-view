@@ -27,3 +27,9 @@
 - Footprint gate now honours upstream's allowDistant (gateParity reads the bypass list off the anchor gate).
 - Merge regression found live on v15: upstream same-site gate 403'd every cost endpoint behind Cloud Run. Fixed in v16 behind GEV_TRUSTED_PROXY_HOPS.
 - Live checks: 401 unauthed, 200 authed on both hostnames, HUD summary 200 with text, realtime token 200, cross-site 403, setup/status 404.
+
+## 2026-10-18 - v19 live (revision gods-eye-view-00023-zhw)
+- Open voice engine (GEV_VOICE_ENGINE=open): Groq Whisper in; DeepSeek/OpenRouter/Gemini reply; speech from Fish s2.1-pro-free (free API model; paid S2 models 402), then ElevenLabs v4 on fal, then Chatterbox on DeepInfra, then browser voice. v17/v18 shipped it.
+- Merged upstream main 93ea088f (65 commits). Auth gate moved to server/standalone/basic-auth-gate.js (node:crypto under src/ failed check:boundaries); our modules registered in package-boundaries.json; formatter run.
+- All CI gates green locally: 7871 tests 0 fail, build, check:boundaries, format:check, layer-token, qa:panel-resize, qa:street-level:fixtures 39/39. Paris open-voice harness PASS.
+- Live: 401/200 on both hostnames, speak 200 via fish. Branch pushed to CosmicAndrew/gods-eye-view (Andrew's fork); origin (upstream) is read-only and untouched.
