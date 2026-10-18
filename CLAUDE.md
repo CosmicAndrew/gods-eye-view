@@ -48,8 +48,8 @@ name instead. Details: `docs/DEPLOY-PRIVATE.md`.
 
 ## Governance — canonical, read don't restate (Iron Law #2)
 - **Iron Laws / methodology:** `C:\Users\admin\Projects\_shared\METHODOLOGY.md`
-- **Branching:** `C:\Users\admin\Projects\_shared\BRANCHING.md` — but see hazard 1: this fork's
-  branches are local-only, so the push/cleanup half of that workflow does not apply here.
+- **Branching:** `C:\Users\admin\Projects\_shared\BRANCHING.md` — but see hazard 1: pushes go to
+  Andrew's fork only when he asks; never to origin.
 
 ## Protocol 0 — build gate (Blueprint)
 Before changing a proxy, a layer, or the voice path: (1) route the task; (2) **RED** — a failing test
