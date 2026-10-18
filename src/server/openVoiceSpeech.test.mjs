@@ -16,7 +16,7 @@ import {
   handleOpenVoiceTranscribe,
 } from '../../server/providers/openai/open-voice-speech.js';
 
-const KEYS = ['GROQ_API_KEY', 'FISH_API_KEY', 'DEEPINFRA_API_KEY', 'GEV_VOICE_TTS_PROVIDERS', 'GEV_VOICE_FISH_VOICE_ID'];
+const KEYS = ['GROQ_API_KEY', 'FISH_API_KEY', 'FAL_KEY', 'DEEPINFRA_API_KEY', 'GEV_VOICE_TTS_PROVIDERS', 'GEV_VOICE_FISH_VOICE_ID'];
 
 function setEnv(t, values) {
   const saved = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
@@ -143,4 +143,36 @@ test('speak validates text and honours GEV_VOICE_TTS_PROVIDERS', async (t) => {
   assert.equal((await invoke(handleOpenVoiceSpeak, { body: '{bad' })).status, 400);
   for (const key of ['FISH_API_KEY', 'DEEPINFRA_API_KEY']) delete process.env[key];
   assert.equal((await invoke(handleOpenVoiceSpeak, { body: JSON.stringify({ text: 'Hi.' }) })).status, 503);
+});
+
+test('speak reaches ElevenLabs v4 on fal after Fish and fetches the hosted file', async (t) => {
+  setEnv(t, { FISH_API_KEY: 'fish-fixture', FAL_KEY: 'fal-fixture', DEEPINFRA_API_KEY: 'di-fixture' });
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, init = {}) => {
+    calls.push({ url, init });
+    if (url.includes('fish.audio')) return Response.json({ status: 402 }, { status: 402 });
+    if (url === 'https://fal.run/elevenlabs/tts/eleven-v4') {
+      assert.equal(init.headers.Authorization, 'Key fal-fixture');
+      assert.equal(JSON.parse(init.body).text, 'Hello.');
+      return Response.json({ audio: { url: 'https://v3.fal.media/files/x/speech.mp3' } });
+    }
+    if (url === 'https://v3.fal.media/files/x/speech.mp3') return audioResponse();
+    assert.fail(`unexpected ${url}`);
+  });
+  const reply = await invoke(handleOpenVoiceSpeak, { body: JSON.stringify({ text: 'Hello.' }) });
+  assert.equal(reply.status, 200);
+  assert.equal(reply.headers['x-gev-tts-provider'], 'fal');
+  assert.equal(calls.length, 3);
+});
+
+test('a fal answer without an https audio file falls through to Chatterbox', async (t) => {
+  setEnv(t, { FAL_KEY: 'fal-fixture', DEEPINFRA_API_KEY: 'di-fixture' });
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    if (url.startsWith('https://fal.run/')) return Response.json({ audio: { url: 'http://insecure.example/a.mp3' } });
+    if (url.includes('deepinfra')) return audioResponse();
+    assert.fail(`unexpected ${url}`);
+  });
+  const reply = await invoke(handleOpenVoiceSpeak, { body: JSON.stringify({ text: 'Hello.' }) });
+  assert.equal(reply.status, 200);
+  assert.equal(reply.headers['x-gev-tts-provider'], 'deepinfra');
 });

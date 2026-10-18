@@ -7,8 +7,9 @@ import { makeCostRateLimiter } from '../common/rate-limit.js';
  *
  * The browser posts a 16 kHz WAV utterance to /transcribe (Groq Whisper) and a
  * reply sentence to /speak, which tries each synthesis provider in
- * GEV_VOICE_TTS_PROVIDERS order (Fish Audio, then Chatterbox on DeepInfra) and
- * returns the first audio that comes back. Keys stay server-side.
+ * GEV_VOICE_TTS_PROVIDERS order (Fish Audio, ElevenLabs v4 on fal, then
+ * Chatterbox on DeepInfra) and returns the first audio that comes back. Keys
+ * stay server-side.
  */
 
 const STT = {
@@ -32,6 +33,25 @@ const TTS_PROVIDERS = {
       },
     }),
   },
+  // fal answers with JSON naming a hosted file; audioFrom fetches it.
+  fal: {
+    keyEnv: 'FAL_KEY',
+    request: (text, key) => ({
+      url: `https://fal.run/${process.env.GEV_VOICE_FAL_MODEL || 'elevenlabs/tts/eleven-v4'}`,
+      headers: { Authorization: `Key ${key}` },
+      body: {
+        text,
+        output_format: 'mp3_44100_128',
+        ...(process.env.GEV_VOICE_FAL_VOICE ? { voice: process.env.GEV_VOICE_FAL_VOICE } : {}),
+      },
+    }),
+    async audioFrom(response) {
+      const fileUrl = (await response.json().catch(() => null))?.audio?.url;
+      if (typeof fileUrl !== 'string' || !fileUrl.startsWith('https://')) return null;
+      const file = await fetch(fileUrl, { redirect: 'error', signal: AbortSignal.timeout(15_000) });
+      return file.ok ? file : null;
+    },
+  },
   deepinfra: {
     keyEnv: 'DEEPINFRA_API_KEY',
     request: (text, key) => ({
@@ -47,7 +67,7 @@ const TTS_PROVIDERS = {
   },
 };
 
-const DEFAULT_TTS_ORDER = ['fish', 'deepinfra'];
+const DEFAULT_TTS_ORDER = ['fish', 'fal', 'deepinfra'];
 const MAX_AUDIO_BYTES = 4 * 1024 * 1024; // about two minutes of 16 kHz mono PCM
 const MAX_TEXT_CHARS = 1200;
 const SPEECH_DEFAULT_PER_MIN = 120;
@@ -147,15 +167,17 @@ async function handleOpenVoiceSpeak(req, res) {
     return answer(res, 400, { error: 'Malformed speech request' });
 
   for (const name of providers) {
-    const { url, headers, body } = TTS_PROVIDERS[name].request(text.trim(), process.env[TTS_PROVIDERS[name].keyEnv]);
+    const provider = TTS_PROVIDERS[name];
+    const { url, headers, body } = provider.request(text.trim(), process.env[provider.keyEnv]);
     try {
-      const response = await fetch(url, {
+      let response = await fetch(url, {
         method: 'POST',
         redirect: 'error',
         signal: AbortSignal.timeout(15_000),
         headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      if (response.ok && provider.audioFrom) response = (await provider.audioFrom(response)) || response;
       const type = response.headers.get('content-type') || '';
       if (!response.ok || !type.startsWith('audio/')) {
         await response.body?.cancel?.().catch(() => {});
