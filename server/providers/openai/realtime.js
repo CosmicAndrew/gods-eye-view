@@ -15,6 +15,10 @@ import {
 import { realtimeInstructions } from './instructions.js';
 import { GEV_REALTIME_TOOLS } from './tools.js';
 import {
+  configuredOpenVoiceProviders,
+  openVoiceEngineEnabled,
+} from './open-voice.js';
+import {
   preferCodexOAuth,
   readCodexOAuthAccessToken,
   createCodexOAuthLogin,
@@ -143,6 +147,23 @@ function createRealtimeTokenHandler({
       res.statusCode = 405;
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ error: 'Method not allowed' }));
+      return;
+    }
+
+    // GEV_VOICE_ENGINE=open: speech runs in the browser and text turns go to
+    // /api/voice/open/respond, so there is no OpenAI session to mint. The
+    // client reads `engine` and opens its local transport instead of WebRTC.
+    if (openVoiceEngineEnabled(environment)) {
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('X-GEV-Voice-Engine', 'open');
+      res.end(
+        JSON.stringify({
+          engine: 'open',
+          value: 'open-voice',
+          providers: configuredOpenVoiceProviders(environment),
+        }),
+      );
       return;
     }
 

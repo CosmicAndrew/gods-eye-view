@@ -141,6 +141,11 @@ export class RealtimeConnection {
       this.audioEl.style.display = 'none';
       document.body.appendChild(this.audioEl);
 
+      if (minted.engine === 'open') {
+        await this.startOpenEngine({ epoch, signal, localStream });
+        return;
+      }
+
       localPc = new RTCPeerConnection();
       this.pc = localPc;
       const ownsConnection = () =>
@@ -175,48 +180,7 @@ export class RealtimeConnection {
         .forEach((track) => this.pc.addTrack(track, this.stream));
 
       const dataChannel = this.pc.createDataChannel('oai-events');
-      this.dc = dataChannel;
-      const ownsChannel = () => ownsConnection() && this.dc === dataChannel;
-      dataChannel.addEventListener('open', () => {
-        if (!ownsChannel()) return;
-        const detail = this.input.pushToTalkMode
-          ? this.input.pushToTalkKeyHeld
-            ? t('Release Space to send')
-            : t('Hold Space to talk')
-          : t('Ask or command');
-        this.setStatus('listening', detail);
-        this.debugLog('data_channel.open', {
-          connection: this.connectionDiagnostics(dataChannel),
-        });
-      });
-      dataChannel.addEventListener('message', (event) => {
-        if (ownsChannel() && dataChannel.readyState === 'open')
-          return this.handleRealtimeEvent(event);
-      });
-      dataChannel.addEventListener('error', (event) => {
-        // Skip if we're mid-teardown (the close we triggered) — otherwise a real
-        // channel error tears the session down so the mic doesn't stay live (H8).
-        if (this._tearingDown || !ownsChannel()) return;
-        this.fatalError(
-          'Realtime data channel',
-          event,
-          this.connectionDiagnostics(dataChannel),
-        );
-      });
-      dataChannel.addEventListener('close', () => {
-        if (this._tearingDown || !ownsChannel()) return;
-        if (
-          this.dc === dataChannel &&
-          this.status !== 'idle' &&
-          this.status !== 'error'
-        ) {
-          this.fatalError(
-            'Realtime data channel closed',
-            null,
-            this.connectionDiagnostics(dataChannel),
-          );
-        }
-      });
+      this.bindChannel(dataChannel, ownsConnection);
 
       const offer = await localPc.createOffer();
       if (this.abandonStart(epoch, { localStream, localPc })) return;
@@ -252,6 +216,87 @@ export class RealtimeConnection {
       this.stop({ preserveStatus: true });
       this.reportError('Realtime connection', error, diagnostics);
     }
+  }
+
+  /** Wire a Realtime-protocol channel (WebRTC or the open engine's) to the turns. */
+  bindChannel(dataChannel, ownsConnection) {
+    this.dc = dataChannel;
+    const ownsChannel = () => ownsConnection() && this.dc === dataChannel;
+    dataChannel.addEventListener('open', () => {
+      if (!ownsChannel()) return;
+      const detail = this.input.pushToTalkMode
+        ? this.input.pushToTalkKeyHeld
+          ? t('Release Space to send')
+          : t('Hold Space to talk')
+        : t('Ask or command');
+      this.setStatus('listening', detail);
+      this.debugLog('data_channel.open', {
+        connection: this.connectionDiagnostics(dataChannel),
+      });
+    });
+    dataChannel.addEventListener('message', (event) => {
+      if (ownsChannel() && dataChannel.readyState === 'open')
+        return this.handleRealtimeEvent(event);
+    });
+    dataChannel.addEventListener('error', (event) => {
+      // Skip if we're mid-teardown (the close we triggered) — otherwise a real
+      // channel error tears the session down so the mic doesn't stay live (H8).
+      if (this._tearingDown || !ownsChannel()) return;
+      this.fatalError(
+        'Realtime data channel',
+        event,
+        this.connectionDiagnostics(dataChannel),
+      );
+    });
+    dataChannel.addEventListener('close', () => {
+      if (this._tearingDown || !ownsChannel()) return;
+      if (
+        this.dc === dataChannel &&
+        this.status !== 'idle' &&
+        this.status !== 'error'
+      ) {
+        this.fatalError(
+          'Realtime data channel closed',
+          null,
+          this.connectionDiagnostics(dataChannel),
+        );
+      }
+    });
+  }
+
+  /**
+   * GEV_VOICE_ENGINE=open: speech runs in the browser and the conversation
+   * goes to /api/voice/open/respond. The transport presents the same channel
+   * and remote-stream surface as WebRTC, so everything downstream is shared.
+   * Loaded on demand: the speech models' runtime is large.
+   */
+  async startOpenEngine({ epoch, signal, localStream }) {
+    const { startOpenVoiceTransport } = await import(
+      './openVoice/openVoiceTransport.js'
+    );
+    if (this.abandonStart(epoch, { localStream })) return;
+    const transport = await startOpenVoiceTransport({
+      stream: localStream,
+      signal,
+      onStatus: (detail) => {
+        if (epoch === this.startEpoch) this.setStatus('connecting', detail);
+      },
+      debugLog: (event, detail) => this.debugLog(event, detail),
+    });
+    if (epoch !== this.startEpoch || signal.aborted) {
+      transport.dispose();
+      this.abandonStart(epoch, { localStream });
+      return;
+    }
+    this.pc = transport.peerConnection;
+    const peer = this.pc;
+    const ownsConnection = () =>
+      epoch === this.startEpoch && this.pc === peer && !signal.aborted;
+    this.audioEl.srcObject = transport.remoteStream;
+    this.startAssistantVoiceVisualizer(transport.remoteStream);
+    this.bindChannel(transport.channel, ownsConnection);
+    this.debugLog('open_voice.transport.ready', {});
+    transport.open();
   }
 
   // Returns true (and tears down the just-acquired resources) when this start()

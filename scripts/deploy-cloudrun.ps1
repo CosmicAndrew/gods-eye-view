@@ -37,11 +37,11 @@ foreach ($line in Get-Content (Join-Path $repo '.env')) {
   if (-not $name -or -not $value -or $skip -contains $name -or $value -like 'PASTE_YOUR*') { continue }
   $vars[$name] = $value
 }
-
+# HUD-summary and open-voice keys (hud-summary.js, open-voice*.js) live in the
 # HUD-summary fallback keys (server/providers/openai/hud-summary.js) live in the
 # Windows user environment rather than .env; carry them over without writing
 # them to a file. A value in .env still wins.
-foreach ($name in @('GEMINI_API_KEY', 'DEEPSEEK_API_KEY', 'OPENROUTER_API_KEY')) {
+foreach ($name in @('GEMINI_API_KEY', 'DEEPSEEK_API_KEY', 'OPENROUTER_API_KEY', 'GROQ_API_KEY', 'FISH_API_KEY', 'DEEPINFRA_API_KEY')) {
   $value = [Environment]::GetEnvironmentVariable($name)
   if (-not $vars[$name] -and $value) { $vars[$name] = $value }
 }

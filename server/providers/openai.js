@@ -8,6 +8,10 @@ import {
 } from './openai/realtime.js';
 import { sameSiteGated } from './common/same-site.js';
 import { createCodexOAuthLogin } from './openai/codex-auth.js';
+import { createOpenVoiceRespondHandler } from './openai/open-voice.js';
+import { handleOpenVoiceSpeak, handleOpenVoiceTranscribe } from './openai/open-voice-speech.js';
+import { realtimeInstructions } from './openai/instructions.js';
+import { GEV_REALTIME_TOOLS } from './openai/tools.js';
 
 /**
  * Vite plugin: OpenAI Realtime ephemeral client secret.
@@ -37,6 +41,22 @@ function openAiRealtimeProxy({
         createRealtimeTokenHandler({ ...realtime, annotationGuidance }),
       ),
     );
+
+    // Open-source voice text turns (GEV_VOICE_ENGINE=open); same tools and
+    // instructions as the Realtime session above.
+    middlewares.use(
+      '/api/voice/open/respond',
+      sameSiteGated(
+        createOpenVoiceRespondHandler({
+          tools: realtime.tools || GEV_REALTIME_TOOLS,
+          instructions: () => realtimeInstructions(annotationGuidance),
+        }),
+      ),
+    );
+
+    // Hosted speech for the open engine: Groq Whisper in, Fish/Chatterbox out.
+    middlewares.use('/api/voice/open/transcribe', sameSiteGated(handleOpenVoiceTranscribe));
+    middlewares.use('/api/voice/open/speak', sameSiteGated(handleOpenVoiceSpeak));
 
     middlewares.use(
       '/api/realtime/oauth-status',
