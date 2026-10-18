@@ -10,6 +10,7 @@ import { disposeAisStream } from '../providers/vessels/ais-live.js';
 import { basicAuthGate } from '../../src/server/basicAuthGate.js';
 import { immutableAssets } from '../../src/server/immutableAssets.js';
 import { installProcessGuards } from '../../src/server/processGuards.js';
+import { unwatchedRuntimeDirsPlugin } from './unwatched-cache.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -29,6 +30,7 @@ export default defineConfig(({ command, mode }) => {
       ...localProviderPlugins({ realtime: { tools: standaloneVoiceTools() } }),
       localMcpPlugin(),
       apiNotFoundPlugin(),
+      unwatchedRuntimeDirsPlugin(),
     ],
     googleApiKey: process.env.GOOGLE_MAPS_API_KEY,
     cesiumToken: process.env.CESIUM_ION_TOKEN,
