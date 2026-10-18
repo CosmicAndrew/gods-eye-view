@@ -397,7 +397,12 @@ export function createAnnotationResolver({
       geocodePrimary || label,
       geocodeTypes,
     );
-    if (fromGeocode && !bypassNearViewGuards && !allowDistant && !echoesTheAsk) {
+    if (
+      fromGeocode &&
+      !bypassNearViewGuards &&
+      !allowDistant &&
+      !echoesTheAsk
+    ) {
       const drift = gateDrift(lat, lon);
       if (drift) {
         if (trace.query) {

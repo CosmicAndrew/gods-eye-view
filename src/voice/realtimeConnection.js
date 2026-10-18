@@ -271,9 +271,8 @@ export class RealtimeConnection {
    * Loaded on demand: the speech models' runtime is large.
    */
   async startOpenEngine({ epoch, signal, localStream }) {
-    const { startOpenVoiceTransport } = await import(
-      './openVoice/openVoiceTransport.js'
-    );
+    const { startOpenVoiceTransport } =
+      await import('./openVoice/openVoiceTransport.js');
     if (this.abandonStart(epoch, { localStream })) return;
     const transport = await startOpenVoiceTransport({
       stream: localStream,

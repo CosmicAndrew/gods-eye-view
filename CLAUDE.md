@@ -20,7 +20,7 @@ Windows/preview parity plus voice and layer fixes: **24 of 29 commits**, on
    and there is no server. This has already been diagnosed twice; do not re-propose static hosting.
 3. **`GOOGLE_MAPS_API_KEY` is baked into the built bundle** (vite `define` injects at build time) and
    its Application restrictions are deliberately **None**, because one key serves both the browser
-   and the Node proxy. Therefore `src/server/basicAuthGate.js` must stay the **FIRST** plugin —
+   and the Node proxy. Therefore `server/standalone/basic-auth-gate.js` must stay the **FIRST** plugin —
    gating only `/api` still serves the key-bearing JS. It is unshifted with `enforce: 'pre'` in
    `server/standalone/vite.config.js`, because upstream's Host check is also `pre`. Publishing `dist/` unprotected hands out an
    unrestricted Enterprise-SKU key.

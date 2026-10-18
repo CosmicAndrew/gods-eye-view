@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { basicAuthGate, requiresGate } from './basicAuthGate.js';
+import { basicAuthGate, requiresGate } from '../../server/standalone/basic-auth-gate.js';
 import { clientKeyFrom } from './clientKey.js';
 
 const header = (u, p) => `Basic ${Buffer.from(`${u}:${p}`).toString('base64')}`;

@@ -47,7 +47,8 @@ export function createAuthThrottle({
       const entry = clients.get(key);
       if (!entry) return 0;
       const t = now();
-      if (entry.blockedUntil > t) return Math.ceil((entry.blockedUntil - t) / 1000);
+      if (entry.blockedUntil > t)
+        return Math.ceil((entry.blockedUntil - t) / 1000);
       // The cooldown has run out, or the window lapsed with room to spare.
       if (entry.blockedUntil) clients.delete(key);
       return 0;

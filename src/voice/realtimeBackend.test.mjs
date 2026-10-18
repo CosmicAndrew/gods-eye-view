@@ -149,8 +149,10 @@ test('controller lifetime stops pending transport and releases resources through
 
 test('the open engine marker skips the client secret and never negotiates SDP', async () => {
   const backend = createRealtimeBackend({
-    tokenTransport: async () => Response.json({ engine: 'open', value: 'open-voice' }),
-    connectionTransport: async () => assert.fail('no SDP exchange for the open engine'),
+    tokenTransport: async () =>
+      Response.json({ engine: 'open', value: 'open-voice' }),
+    connectionTransport: async () =>
+      assert.fail('no SDP exchange for the open engine'),
   });
   const credential = await backend.requestToken();
   assert.equal(credential.engine, 'open');

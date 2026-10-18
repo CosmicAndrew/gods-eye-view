@@ -9,7 +9,10 @@ import {
 import { sameSiteGated } from './common/same-site.js';
 import { createCodexOAuthLogin } from './openai/codex-auth.js';
 import { createOpenVoiceRespondHandler } from './openai/open-voice.js';
-import { handleOpenVoiceSpeak, handleOpenVoiceTranscribe } from './openai/open-voice-speech.js';
+import {
+  handleOpenVoiceSpeak,
+  handleOpenVoiceTranscribe,
+} from './openai/open-voice-speech.js';
 import { realtimeInstructions } from './openai/instructions.js';
 import { GEV_REALTIME_TOOLS } from './openai/tools.js';
 
@@ -55,8 +58,14 @@ function openAiRealtimeProxy({
     );
 
     // Hosted speech for the open engine: Groq Whisper in, Fish/Chatterbox out.
-    middlewares.use('/api/voice/open/transcribe', sameSiteGated(handleOpenVoiceTranscribe));
-    middlewares.use('/api/voice/open/speak', sameSiteGated(handleOpenVoiceSpeak));
+    middlewares.use(
+      '/api/voice/open/transcribe',
+      sameSiteGated(handleOpenVoiceTranscribe),
+    );
+    middlewares.use(
+      '/api/voice/open/speak',
+      sameSiteGated(handleOpenVoiceSpeak),
+    );
 
     middlewares.use(
       '/api/realtime/oauth-status',

@@ -164,9 +164,11 @@ export function createQueries({
       error: keyRequired
         ? t('KEY REQUIRED')
         : emptyCoverage
-        ? null
-        : deriveAisFeedError(payload, acceptedRowCount) ||
-          (acceptedRowCount === 0 ? t('awaiting usable AIS positions…') : null),
+          ? null
+          : deriveAisFeedError(payload, acceptedRowCount) ||
+            (acceptedRowCount === 0
+              ? t('awaiting usable AIS positions…')
+              : null),
     };
   }
 

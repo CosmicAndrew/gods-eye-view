@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { createAuthThrottle } from './authThrottle.js';
-import { clientKeyFrom } from './clientKey.js';
+import { createAuthThrottle } from '../../src/server/authThrottle.js';
+import { clientKeyFrom } from '../../src/server/clientKey.js';
 
 /** Hosts that only this machine can reach. Anything else is a public bind. */
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1']);
@@ -31,7 +31,8 @@ export function requiresGate(host) {
  * so localhost keeps working untouched; a half-configured gate (user but no
  * password) also stays shut rather than authenticating against an empty secret.
  *
- * Lives in src/ because the unit runner discovers src/**\/*.test.mjs only.
+ * Lives in server/ because it needs node:crypto; its tests stay in src/server/
+ * because the unit runner discovers src/**\/*.test.mjs only.
  */
 
 /**
@@ -43,7 +44,8 @@ export function requiresGate(host) {
  * sides 32 bytes, so every comparison does identical work.
  */
 function safeEqual(a, b) {
-  const digest = (value) => createHash('sha256').update(String(value), 'utf8').digest();
+  const digest = (value) =>
+    createHash('sha256').update(String(value), 'utf8').digest();
   return timingSafeEqual(digest(a), digest(b));
 }
 
@@ -54,7 +56,12 @@ function safeEqual(a, b) {
  *   and a silent failure open anywhere public.
  * @returns {import('vite').Plugin}
  */
-export function basicAuthGate({ user, password, realm = "God's Eye View", required = false } = {}) {
+export function basicAuthGate({
+  user,
+  password,
+  realm = "God's Eye View",
+  required = false,
+} = {}) {
   const armed = Boolean(user && password);
   // Shared across both hooks so dev and preview cannot be used as two
   // independent guessing budgets.
@@ -119,7 +126,10 @@ export function basicAuthGate({ user, password, realm = "God's Eye View", requir
 
       throttle.recordFailure(who);
       res.statusCode = 401;
-      res.setHeader('WWW-Authenticate', `Basic realm="${realm}", charset="UTF-8"`);
+      res.setHeader(
+        'WWW-Authenticate',
+        `Basic realm="${realm}", charset="UTF-8"`,
+      );
       res.end('Authentication required');
     });
   }

@@ -45,7 +45,14 @@ export function createRealtimeBackend({
       }
       // GEV_VOICE_ENGINE=open: no OpenAI session; speech runs in the browser.
       if (data?.engine === 'open')
-        return { engine: 'open', token: null, model: null, tier: null, transcribeModel: 'off', expiresAt: null };
+        return {
+          engine: 'open',
+          token: null,
+          model: null,
+          tier: null,
+          transcribeModel: 'off',
+          expiresAt: null,
+        };
       const token =
         data?.value || data?.client_secret?.value || data?.client_secret;
       if (typeof token !== 'string' || !token)

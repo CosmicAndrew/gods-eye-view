@@ -27,9 +27,16 @@ function partsText(content, { includeTranscripts = true } = {}) {
   if (!Array.isArray(content)) return '';
   return content
     .map((part) => {
-      if (part?.type === 'input_text' || part?.type === 'output_text' || part?.type === 'text')
+      if (
+        part?.type === 'input_text' ||
+        part?.type === 'output_text' ||
+        part?.type === 'text'
+      )
         return part.text || '';
-      if (includeTranscripts && (part?.type === 'input_audio' || part?.type === 'output_audio'))
+      if (
+        includeTranscripts &&
+        (part?.type === 'input_audio' || part?.type === 'output_audio')
+      )
         return part.transcript || '';
       return ''; // images: the text models behind this engine cannot read them
     })
@@ -59,14 +66,20 @@ export function toChatTurns(items, { maxMessages = MAX_CHAT_MESSAGES } = {}) {
       if (!toolTurn || toolTurn.responseId !== item.response_id) {
         const last = turns.at(-1);
         toolTurn =
-          last?.role === 'assistant' && last.responseId === item.response_id && !last.tool_calls
+          last?.role === 'assistant' &&
+          last.responseId === item.response_id &&
+          !last.tool_calls
             ? last
             : { role: 'assistant', content: '', responseId: item.response_id };
         if (toolTurn !== last) turns.push(toolTurn);
         toolTurn.tool_calls = [];
         toolTurn.results = [];
       }
-      toolTurn.tool_calls.push({ id: item.call_id, name: item.name, arguments: String(item.arguments ?? '{}') });
+      toolTurn.tool_calls.push({
+        id: item.call_id,
+        name: item.name,
+        arguments: String(item.arguments ?? '{}'),
+      });
       toolTurn.results.push({
         role: 'tool',
         tool_call_id: item.call_id,
@@ -81,11 +94,19 @@ export function toChatTurns(items, { maxMessages = MAX_CHAT_MESSAGES } = {}) {
     if (item?.type !== 'message') continue;
     const text = partsText(item.content).trim();
     if (!text) continue;
-    if (item.role === 'assistant') turns.push({ role: 'assistant', content: text, responseId: item.response_id });
+    if (item.role === 'assistant')
+      turns.push({
+        role: 'assistant',
+        content: text,
+        responseId: item.response_id,
+      });
     else if (item.role === 'user') turns.push({ role: 'user', content: text });
     else if (item.role === 'system')
       // The server owns the system prompt; app context travels as a labelled user turn.
-      turns.push({ role: 'user', content: `App context (not spoken by the operator): ${text}` });
+      turns.push({
+        role: 'user',
+        content: `App context (not spoken by the operator): ${text}`,
+      });
   }
   if (toolTurn) turns.push(...toolTurn.results);
 
@@ -113,10 +134,20 @@ export function createOpenVoicePeer({ respond, speech }) {
   const emit = (event) => {
     if (readyState !== 'open') return;
     const payload = { event_id: nextId('event'), ...event };
-    target.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(payload) }));
+    target.dispatchEvent(
+      new MessageEvent('message', { data: JSON.stringify(payload) }),
+    );
   };
   const emitError = (code, message, eventId) =>
-    emit({ type: 'error', error: { type: 'invalid_request_error', code, message, event_id: eventId || null } });
+    emit({
+      type: 'error',
+      error: {
+        type: 'invalid_request_error',
+        code,
+        message,
+        event_id: eventId || null,
+      },
+    });
 
   /** Queue playback after any line already speaking, as one audio stream would. */
   function play(responseId, text, signal) {
@@ -154,21 +185,58 @@ export function createOpenVoicePeer({ respond, speech }) {
 
   function speakText(response, text, signal) {
     const itemId = nextId('item');
-    emit({ type: 'response.output_audio_transcript.delta', response_id: response.id, item_id: itemId, output_index: 0, content_index: 0, delta: text });
-    emit({ type: 'response.output_audio_transcript.done', response_id: response.id, item_id: itemId, output_index: 0, content_index: 0, transcript: text });
-    return { id: itemId, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_audio', transcript: text }], response_id: response.id };
+    emit({
+      type: 'response.output_audio_transcript.delta',
+      response_id: response.id,
+      item_id: itemId,
+      output_index: 0,
+      content_index: 0,
+      delta: text,
+    });
+    emit({
+      type: 'response.output_audio_transcript.done',
+      response_id: response.id,
+      item_id: itemId,
+      output_index: 0,
+      content_index: 0,
+      transcript: text,
+    });
+    return {
+      id: itemId,
+      type: 'message',
+      role: 'assistant',
+      status: 'completed',
+      content: [{ type: 'output_audio', transcript: text }],
+      response_id: response.id,
+    };
   }
 
   async function startResponse(options, eventId) {
     const outOfBand = options.conversation === 'none';
-    const response = { id: nextId('resp'), metadata: options.metadata ?? null, controller: new AbortController() };
+    const response = {
+      id: nextId('resp'),
+      metadata: options.metadata ?? null,
+      controller: new AbortController(),
+    };
     if (!outOfBand) active = response;
-    emit({ type: 'response.created', response: { id: response.id, object: 'realtime.response', status: 'in_progress', output: [], metadata: response.metadata } });
+    emit({
+      type: 'response.created',
+      response: {
+        id: response.id,
+        object: 'realtime.response',
+        status: 'in_progress',
+        output: [],
+        metadata: response.metadata,
+      },
+    });
     const { signal } = response.controller;
 
     if (outOfBand) {
       // Progress lines are code-authored: read them aloud, no model needed.
-      const line = (options.input || []).map((item) => partsText(item?.content)).join(' ').trim();
+      const line = (options.input || [])
+        .map((item) => partsText(item?.content))
+        .join(' ')
+        .trim();
       const output = line ? [speakText(response, line, signal)] : [];
       finish(response, 'completed', output);
       if (line) play(response.id, line, signal);
@@ -183,14 +251,22 @@ export function createOpenVoicePeer({ respond, speech }) {
     let reply;
     try {
       reply = await respond(
-        { messages, instructions: options.instructions, toolChoice: options.tool_choice },
+        {
+          messages,
+          instructions: options.instructions,
+          toolChoice: options.tool_choice,
+        },
         { signal },
       );
     } catch (error) {
       if (signal.aborted) return; // the cancel already ended this response
       finish(response, 'failed', [], {
         type: 'failed',
-        error: { type: 'server_error', code: 'open_voice_failed', message: error?.message || 'Open voice request failed' },
+        error: {
+          type: 'server_error',
+          code: 'open_voice_failed',
+          message: error?.message || 'Open voice request failed',
+        },
       });
       return;
     }
@@ -215,7 +291,12 @@ export function createOpenVoicePeer({ respond, speech }) {
       };
       items.push(item);
       output.push(item);
-      emit({ type: 'response.output_item.done', response_id: response.id, output_index: output.length - 1, item });
+      emit({
+        type: 'response.output_item.done',
+        response_id: response.id,
+        output_index: output.length - 1,
+        item,
+      });
     }
     finish(response, 'completed', output);
     if (text) play(response.id, text, signal);
@@ -235,15 +316,25 @@ export function createOpenVoicePeer({ respond, speech }) {
         emit({ type: 'session.updated' });
         return;
       case 'conversation.item.create': {
-        const item = { ...message.item, id: message.item?.id || nextId('item') };
+        const item = {
+          ...message.item,
+          id: message.item?.id || nextId('item'),
+        };
         items.push(item);
-        emit({ type: 'conversation.item.created', item: { id: item.id, type: item.type } });
+        emit({
+          type: 'conversation.item.created',
+          item: { id: item.id, type: item.type },
+        });
         return;
       }
       case 'conversation.item.delete': {
         const index = items.findIndex((item) => item.id === message.item_id);
         if (index < 0) {
-          emitError('item_not_found', `Item ${message.item_id} not found`, message.event_id);
+          emitError(
+            'item_not_found',
+            `Item ${message.item_id} not found`,
+            message.event_id,
+          );
           return;
         }
         items.splice(index, 1);
@@ -252,7 +343,11 @@ export function createOpenVoicePeer({ respond, speech }) {
       }
       case 'response.create':
         if (active && message.response?.conversation !== 'none') {
-          emitError('conversation_already_has_active_response', 'Conversation already has an active response', message.event_id);
+          emitError(
+            'conversation_already_has_active_response',
+            'Conversation already has an active response',
+            message.event_id,
+          );
           return;
         }
         startResponse(message.response || {}, message.event_id);
@@ -262,7 +357,10 @@ export function createOpenVoicePeer({ respond, speech }) {
         return;
       case 'output_audio_buffer.clear':
         speech.stop();
-        emit({ type: 'output_audio_buffer.cleared', response_id: active?.id || null });
+        emit({
+          type: 'output_audio_buffer.cleared',
+          response_id: active?.id || null,
+        });
         return;
       default:
         return; // input_audio_buffer.* and others have no local meaning
@@ -277,7 +375,8 @@ export function createOpenVoicePeer({ respond, speech }) {
     addEventListener: (...args) => target.addEventListener(...args),
     removeEventListener: (...args) => target.removeEventListener(...args),
     send(data) {
-      if (readyState !== 'open') throw new Error('Open voice channel is not open');
+      if (readyState !== 'open')
+        throw new Error('Open voice channel is not open');
       let message;
       try {
         message = JSON.parse(data);
@@ -303,14 +402,25 @@ export function createOpenVoicePeer({ respond, speech }) {
       if (readyState !== 'connecting') return;
       readyState = 'open';
       target.dispatchEvent(new Event('open'));
-      emit({ type: 'session.created', session: { type: 'realtime', model: 'open-voice' } });
+      emit({
+        type: 'session.created',
+        session: { type: 'realtime', model: 'open-voice' },
+      });
     },
     userSpeechStarted() {
       userItemId = nextId('item');
-      emit({ type: 'input_audio_buffer.speech_started', item_id: userItemId, audio_start_ms: 0 });
+      emit({
+        type: 'input_audio_buffer.speech_started',
+        item_id: userItemId,
+        audio_start_ms: 0,
+      });
     },
     userSpeechStopped() {
-      emit({ type: 'input_audio_buffer.speech_stopped', item_id: userItemId, audio_end_ms: 0 });
+      emit({
+        type: 'input_audio_buffer.speech_stopped',
+        item_id: userItemId,
+        audio_end_ms: 0,
+      });
       emit({ type: 'input_audio_buffer.committed', item_id: userItemId });
     },
     userTranscript(text) {
@@ -321,12 +431,30 @@ export function createOpenVoicePeer({ respond, speech }) {
         // Nothing intelligible. The client keeps the user turn open until a
         // response starts, so close it with an empty one.
         const response = { id: nextId('resp'), metadata: null };
-        emit({ type: 'response.created', response: { id: response.id, object: 'realtime.response', status: 'in_progress', output: [] } });
+        emit({
+          type: 'response.created',
+          response: {
+            id: response.id,
+            object: 'realtime.response',
+            status: 'in_progress',
+            output: [],
+          },
+        });
         finish(response, 'completed');
         return;
       }
-      items.push({ id: itemId, type: 'message', role: 'user', content: [{ type: 'input_audio', transcript }] });
-      emit({ type: 'conversation.item.input_audio_transcription.completed', item_id: itemId, content_index: 0, transcript });
+      items.push({
+        id: itemId,
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_audio', transcript }],
+      });
+      emit({
+        type: 'conversation.item.input_audio_transcription.completed',
+        item_id: itemId,
+        content_index: 0,
+        transcript,
+      });
       // Realtime's turn detection creates the response itself (create_response).
       if (active) pendingAutoResponse = true;
       else startResponse({});

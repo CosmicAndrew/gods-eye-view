@@ -24,12 +24,17 @@ const TTS_PROVIDERS = {
     keyEnv: 'FISH_API_KEY',
     request: (text, key) => ({
       url: 'https://api.fish.audio/v1/tts',
-      headers: { Authorization: `Bearer ${key}`, model: process.env.GEV_VOICE_FISH_MODEL || 's2.1-pro-free' },
+      headers: {
+        Authorization: `Bearer ${key}`,
+        model: process.env.GEV_VOICE_FISH_MODEL || 's2.1-pro-free',
+      },
       body: {
         text,
         format: 'mp3',
         latency: 'balanced',
-        ...(process.env.GEV_VOICE_FISH_VOICE_ID ? { reference_id: process.env.GEV_VOICE_FISH_VOICE_ID } : {}),
+        ...(process.env.GEV_VOICE_FISH_VOICE_ID
+          ? { reference_id: process.env.GEV_VOICE_FISH_VOICE_ID }
+          : {}),
       },
     }),
   },
@@ -42,13 +47,19 @@ const TTS_PROVIDERS = {
       body: {
         text,
         output_format: 'mp3_44100_128',
-        ...(process.env.GEV_VOICE_FAL_VOICE ? { voice: process.env.GEV_VOICE_FAL_VOICE } : {}),
+        ...(process.env.GEV_VOICE_FAL_VOICE
+          ? { voice: process.env.GEV_VOICE_FAL_VOICE }
+          : {}),
       },
     }),
     async audioFrom(response) {
       const fileUrl = (await response.json().catch(() => null))?.audio?.url;
-      if (typeof fileUrl !== 'string' || !fileUrl.startsWith('https://')) return null;
-      const file = await fetch(fileUrl, { redirect: 'error', signal: AbortSignal.timeout(15_000) });
+      if (typeof fileUrl !== 'string' || !fileUrl.startsWith('https://'))
+        return null;
+      const file = await fetch(fileUrl, {
+        redirect: 'error',
+        signal: AbortSignal.timeout(15_000),
+      });
       return file.ok ? file : null;
     },
   },
@@ -58,10 +69,14 @@ const TTS_PROVIDERS = {
       url: 'https://api.deepinfra.com/v1/openai/audio/speech',
       headers: { Authorization: `Bearer ${key}` },
       body: {
-        model: process.env.GEV_VOICE_DEEPINFRA_MODEL || 'ResembleAI/chatterbox-turbo',
+        model:
+          process.env.GEV_VOICE_DEEPINFRA_MODEL ||
+          'ResembleAI/chatterbox-turbo',
         input: text,
         response_format: 'mp3',
-        ...(process.env.GEV_VOICE_DEEPINFRA_VOICE ? { voice: process.env.GEV_VOICE_DEEPINFRA_VOICE } : {}),
+        ...(process.env.GEV_VOICE_DEEPINFRA_VOICE
+          ? { voice: process.env.GEV_VOICE_DEEPINFRA_VOICE }
+          : {}),
       },
     }),
   },
@@ -81,7 +96,8 @@ function configuredTtsProviders(environment = process.env) {
     .map((name) => name.trim().toLowerCase())
     .filter(Boolean);
   return (listed.length ? listed : DEFAULT_TTS_ORDER).filter(
-    (name) => TTS_PROVIDERS[name] && hasKey(environment, TTS_PROVIDERS[name].keyEnv),
+    (name) =>
+      TTS_PROVIDERS[name] && hasKey(environment, TTS_PROVIDERS[name].keyEnv),
   );
 }
 
@@ -92,7 +108,10 @@ function hostedSttConfigured(environment = process.env) {
 let _limiter;
 function speechRateLimiter() {
   if (_limiter === undefined)
-    _limiter = makeCostRateLimiter(process.env.GEV_RATELIMIT_OPEN_VOICE_SPEECH_PER_MIN, SPEECH_DEFAULT_PER_MIN);
+    _limiter = makeCostRateLimiter(
+      process.env.GEV_RATELIMIT_OPEN_VOICE_SPEECH_PER_MIN,
+      SPEECH_DEFAULT_PER_MIN,
+    );
   return _limiter;
 }
 
@@ -119,18 +138,28 @@ function readBinaryBody(req, limit) {
 
 /** POST audio/wav → { text }. */
 async function handleOpenVoiceTranscribe(req, res) {
-  if (req.method !== 'POST') return answer(res, 405, { error: 'Method not allowed' });
-  if (!hostedSttConfigured()) return answer(res, 503, { error: 'No speech recognition key is set' });
+  if (req.method !== 'POST')
+    return answer(res, 405, { error: 'Method not allowed' });
+  if (!hostedSttConfigured())
+    return answer(res, 503, { error: 'No speech recognition key is set' });
   if (!enforceRateLimit(speechRateLimiter(), req, res)) return undefined;
   const audio = await readBinaryBody(req, MAX_AUDIO_BYTES).catch(() => null);
   // A RIFF header is 44 bytes; anything shorter carries no speech.
-  if (!audio || audio.length <= 44 || audio.subarray(0, 4).toString('ascii') !== 'RIFF')
+  if (
+    !audio ||
+    audio.length <= 44 ||
+    audio.subarray(0, 4).toString('ascii') !== 'RIFF'
+  )
     return answer(res, 400, { error: 'Malformed audio' });
   const form = new FormData();
   form.append('model', process.env[STT.modelEnv] || STT.model);
   form.append('language', 'en');
   form.append('response_format', 'json');
-  form.append('file', new Blob([audio], { type: 'audio/wav' }), 'utterance.wav');
+  form.append(
+    'file',
+    new Blob([audio], { type: 'audio/wav' }),
+    'utterance.wav',
+  );
   try {
     const response = await fetch(STT.url, {
       method: 'POST',
@@ -153,9 +182,11 @@ async function handleOpenVoiceTranscribe(req, res) {
 
 /** POST { text } → audio/mpeg, with X-GEV-TTS-Provider naming who spoke. */
 async function handleOpenVoiceSpeak(req, res) {
-  if (req.method !== 'POST') return answer(res, 405, { error: 'Method not allowed' });
+  if (req.method !== 'POST')
+    return answer(res, 405, { error: 'Method not allowed' });
   const providers = configuredTtsProviders();
-  if (!providers.length) return answer(res, 503, { error: 'No speech synthesis key is set' });
+  if (!providers.length)
+    return answer(res, 503, { error: 'No speech synthesis key is set' });
   if (!enforceRateLimit(speechRateLimiter(), req, res)) return undefined;
   let text;
   try {
@@ -168,7 +199,10 @@ async function handleOpenVoiceSpeak(req, res) {
 
   for (const name of providers) {
     const provider = TTS_PROVIDERS[name];
-    const { url, headers, body } = provider.request(text.trim(), process.env[provider.keyEnv]);
+    const { url, headers, body } = provider.request(
+      text.trim(),
+      process.env[provider.keyEnv],
+    );
     try {
       let response = await fetch(url, {
         method: 'POST',
@@ -177,11 +211,14 @@ async function handleOpenVoiceSpeak(req, res) {
         headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (response.ok && provider.audioFrom) response = (await provider.audioFrom(response)) || response;
+      if (response.ok && provider.audioFrom)
+        response = (await provider.audioFrom(response)) || response;
       const type = response.headers.get('content-type') || '';
       if (!response.ok || !type.startsWith('audio/')) {
         await response.body?.cancel?.().catch(() => {});
-        console.warn(`[open-voice] ${name} speak upstream HTTP ${response.status}`);
+        console.warn(
+          `[open-voice] ${name} speak upstream HTTP ${response.status}`,
+        );
         continue;
       }
       const audio = Buffer.from(await response.arrayBuffer());

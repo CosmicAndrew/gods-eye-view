@@ -41,7 +41,11 @@ const OPEN_VOICE_DEFAULT_PER_MIN = 60;
 
 /** Whether the deployment asked for the open-source voice engine. */
 function openVoiceEngineEnabled(environment = process.env) {
-  return String(environment.GEV_VOICE_ENGINE || '').trim().toLowerCase() === 'open';
+  return (
+    String(environment.GEV_VOICE_ENGINE || '')
+      .trim()
+      .toLowerCase() === 'open'
+  );
 }
 
 /** Providers to try, in GEV_VOICE_OPEN_PROVIDERS order, that have a key set. */
@@ -51,7 +55,9 @@ function configuredOpenVoiceProviders(environment = process.env) {
     .map((name) => name.trim().toLowerCase())
     .filter(Boolean);
   return (listed.length ? listed : DEFAULT_ORDER).filter(
-    (name) => PROVIDERS[name] && String(environment[PROVIDERS[name].keyEnv] ?? '').trim(),
+    (name) =>
+      PROVIDERS[name] &&
+      String(environment[PROVIDERS[name].keyEnv] ?? '').trim(),
   );
 }
 
@@ -79,7 +85,11 @@ function toChatTools(tools) {
  * Returns null for anything malformed.
  */
 function toChatMessages(messages) {
-  if (!Array.isArray(messages) || !messages.length || messages.length > MAX_MESSAGES)
+  if (
+    !Array.isArray(messages) ||
+    !messages.length ||
+    messages.length > MAX_MESSAGES
+  )
     return null;
   const out = [];
   for (const message of messages) {
@@ -94,17 +104,26 @@ function toChatMessages(messages) {
       if (!Array.isArray(calls)) return null;
       const toolCalls = [];
       for (const call of calls) {
-        if (typeof call?.id !== 'string' || typeof call?.name !== 'string') return null;
+        if (typeof call?.id !== 'string' || typeof call?.name !== 'string')
+          return null;
         toolCalls.push({
           id: call.id,
           type: 'function',
-          function: { name: call.name, arguments: String(call.arguments ?? '{}') },
+          function: {
+            name: call.name,
+            arguments: String(call.arguments ?? '{}'),
+          },
         });
       }
       if (!content && !toolCalls.length) return null;
-      out.push({ role, content: content || '', ...(toolCalls.length ? { tool_calls: toolCalls } : {}) });
+      out.push({
+        role,
+        content: content || '',
+        ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
+      });
     } else if (role === 'tool') {
-      if (typeof message.tool_call_id !== 'string' || content === null) return null;
+      if (typeof message.tool_call_id !== 'string' || content === null)
+        return null;
       out.push({ role, tool_call_id: message.tool_call_id, content });
     } else {
       return null;
@@ -127,7 +146,8 @@ function answer(res, status, payload) {
 function createOpenVoiceRespondHandler({ tools, instructions }) {
   const chatTools = toChatTools(tools);
   return async (req, res) => {
-    if (req.method !== 'POST') return answer(res, 405, { error: 'Method not allowed' });
+    if (req.method !== 'POST')
+      return answer(res, 405, { error: 'Method not allowed' });
     const providers = configuredOpenVoiceProviders();
     if (!providers.length)
       return answer(res, 503, { error: 'No open voice provider key is set' });
@@ -141,8 +161,13 @@ function createOpenVoiceRespondHandler({ tools, instructions }) {
     }
     const messages = toChatMessages(turn?.messages);
     if (!messages) return answer(res, 400, { error: 'Malformed voice turn' });
-    const extra = typeof turn.instructions === 'string' ? turn.instructions.trim().slice(0, 4000) : '';
-    const system = extra ? `${instructions()}\n\nFor this reply: ${extra}` : instructions();
+    const extra =
+      typeof turn.instructions === 'string'
+        ? turn.instructions.trim().slice(0, 4000)
+        : '';
+    const system = extra
+      ? `${instructions()}\n\nFor this reply: ${extra}`
+      : instructions();
     const withTools = turn.toolChoice !== 'none';
 
     for (const name of providers) {
@@ -169,7 +194,9 @@ function createOpenVoiceRespondHandler({ tools, instructions }) {
           console.warn(`[open-voice] ${name} upstream HTTP ${response.status}`);
           continue;
         }
-        const toolCalls = (Array.isArray(message.tool_calls) ? message.tool_calls : [])
+        const toolCalls = (
+          Array.isArray(message.tool_calls) ? message.tool_calls : []
+        )
           .filter((call) => call?.function?.name)
           .map((call, index) => ({
             id: String(call.id || `call_${Date.now().toString(36)}_${index}`),
@@ -178,7 +205,10 @@ function createOpenVoiceRespondHandler({ tools, instructions }) {
           }));
         return answer(res, 200, {
           provider: name,
-          message: { content: typeof message.content === 'string' ? message.content : '', tool_calls: toolCalls },
+          message: {
+            content: typeof message.content === 'string' ? message.content : '',
+            tool_calls: toolCalls,
+          },
         });
       } catch {
         console.warn(`[open-voice] ${name} request failed`);

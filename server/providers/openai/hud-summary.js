@@ -55,7 +55,8 @@ function configuredProviders(environment = process.env) {
     .filter(Boolean);
   const order = listed.length ? listed : DEFAULT_PROVIDER_ORDER;
   return order.filter((name) => {
-    const keyEnv = name === 'openai' ? 'OPENAI_API_KEY' : CHAT_PROVIDERS[name]?.keyEnv;
+    const keyEnv =
+      name === 'openai' ? 'OPENAI_API_KEY' : CHAT_PROVIDERS[name]?.keyEnv;
     return keyEnv && String(environment[keyEnv] ?? '').trim();
   });
 }

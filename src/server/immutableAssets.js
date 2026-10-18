@@ -28,7 +28,9 @@ export function immutableAssets() {
         // pin ours: without this the header is silently downgraded again.
         const setHeader = res.setHeader.bind(res);
         res.setHeader = (name, value) =>
-          (String(name).toLowerCase() === 'cache-control' ? res : setHeader(name, value));
+          String(name).toLowerCase() === 'cache-control'
+            ? res
+            : setHeader(name, value);
       }
       next();
     });

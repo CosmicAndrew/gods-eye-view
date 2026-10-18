@@ -7,7 +7,7 @@ import { localMcpPlugin } from '../mcp/plugin.js';
 import { apiNotFoundPlugin } from './api-not-found.js';
 import { standaloneVoiceTools } from './voiceTools.js';
 import { disposeAisStream } from '../providers/vessels/ais-live.js';
-import { basicAuthGate } from '../../src/server/basicAuthGate.js';
+import { basicAuthGate } from './basic-auth-gate.js';
 import { immutableAssets } from '../../src/server/immutableAssets.js';
 import { installProcessGuards } from '../../src/server/processGuards.js';
 import { unwatchedRuntimeDirsPlugin } from './unwatched-cache.js';

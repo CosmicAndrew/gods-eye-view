@@ -66,7 +66,9 @@ export function createSpeechDetector({
       const loud = level > threshold();
       // The floor follows quiet frames quickly and loud ones slowly, so a
       // steady fan or engine becomes the floor instead of an endless turn.
-      floor = loud ? floor + (level - floor) * 0.004 : floor + (level - floor) * 0.05;
+      floor = loud
+        ? floor + (level - floor) * 0.004
+        : floor + (level - floor) * 0.05;
       floor = Math.min(Math.max(floor, 0.0005), 0.2);
 
       if (!speaking) {
@@ -85,7 +87,8 @@ export function createSpeechDetector({
 
       utterance.push(frame);
       quietRun = loud ? 0 : quietRun + 1;
-      if (quietRun >= hangoverFrames || utterance.length >= maxFrames) return end();
+      if (quietRun >= hangoverFrames || utterance.length >= maxFrames)
+        return end();
       return null;
     },
     get speaking() {

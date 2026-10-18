@@ -18,15 +18,20 @@
 
 /** Geocode types whose named facility is unambiguous wherever the camera is. */
 const UNAMBIGUOUS_TYPES = new Set([
-  'airport', 'international_airport', 'transit_station',
-  'train_station', 'bus_station', 'subway_station', 'ferry_terminal',
+  'airport',
+  'international_airport',
+  'transit_station',
+  'train_station',
+  'bus_station',
+  'subway_station',
+  'ferry_terminal',
 ]);
 
 /** Lowercase, drop a leading article, strip punctuation and parenthetical codes. */
 function normalize(value) {
   return String(value ?? '')
     .toLowerCase()
-    .replace(/\([^)]*\)/g, ' ')      // "(LAX)" is a code, not part of the name
+    .replace(/\([^)]*\)/g, ' ') // "(LAX)" is a code, not part of the name
     .replace(/^\s*the\s+/, ' ')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
@@ -76,15 +81,22 @@ export function geocodeNameConfidentlyMatches(query, primaryName, types = []) {
     }
   }
 
-  if (!Array.isArray(types) || !types.some((t) => UNAMBIGUOUS_TYPES.has(String(t)))) return false;
+  if (
+    !Array.isArray(types) ||
+    !types.some((t) => UNAMBIGUOUS_TYPES.has(String(t)))
+  )
+    return false;
 
   // A bare code echoes the whole ask: "annotate LAX" against a geocoder result
   // of "... (LAX)". The type gate above already confirmed a transport hub, so a
   // code that equals the ask is unambiguous. Checked before the parens are
   // stripped, since that is where the code lives.
   const askJoined = tokens(query).join(' ');
-  const codes = [...String(primaryName ?? '').matchAll(/\(([^)]+)\)/g)].map((m) => m[1]);
-  if (askJoined && codes.some((c) => tokens(c).join(' ') === askJoined)) return true;
+  const codes = [...String(primaryName ?? '').matchAll(/\(([^)]+)\)/g)].map(
+    (m) => m[1],
+  );
+  if (askJoined && codes.some((c) => tokens(c).join(' ') === askJoined))
+    return true;
 
   const askTokens = tokens(query);
   const gotTokens = tokens(primaryName);

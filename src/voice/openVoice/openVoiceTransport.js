@@ -54,7 +54,8 @@ registerProcessor('gev-mic-tap', GevMicTap);
 /** 16-bit PCM mono WAV, the format /transcribe accepts. */
 function encodeWav(samples, rate) {
   const view = new DataView(new ArrayBuffer(44 + samples.length * 2));
-  const text = (offset, value) => [...value].forEach((c, i) => view.setUint8(offset + i, c.charCodeAt(0)));
+  const text = (offset, value) =>
+    [...value].forEach((c, i) => view.setUint8(offset + i, c.charCodeAt(0)));
   text(0, 'RIFF');
   view.setUint32(4, 36 + samples.length * 2, true);
   text(8, 'WAVEfmt ');
@@ -69,7 +70,11 @@ function encodeWav(samples, rate) {
   view.setUint32(40, samples.length * 2, true);
   for (let i = 0; i < samples.length; i += 1) {
     const clamped = Math.max(-1, Math.min(1, samples[i]));
-    view.setInt16(44 + i * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+    view.setInt16(
+      44 + i * 2,
+      clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff,
+      true,
+    );
   }
   return view.buffer;
 }
@@ -81,21 +86,32 @@ function withDeadline(promise, ms) {
   let timer;
   return Promise.race([
     promise,
-    new Promise((resolve) => { timer = setTimeout(() => resolve(null), ms); }),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(null), ms);
+    }),
   ]).finally(() => clearTimeout(timer));
 }
 
 const hasBrowserVoice = () =>
-  Boolean(globalThis.speechSynthesis) && typeof SpeechSynthesisUtterance !== 'undefined';
+  Boolean(globalThis.speechSynthesis) &&
+  typeof SpeechSynthesisUtterance !== 'undefined';
 
 /** Speak with the browser's built-in voice; resolves when done or stopped. */
 function speakWithBrowser(text, signal) {
   const synth = globalThis.speechSynthesis;
-  if (!synth || typeof SpeechSynthesisUtterance === 'undefined') return Promise.resolve();
+  if (!synth || typeof SpeechSynthesisUtterance === 'undefined')
+    return Promise.resolve();
   return new Promise((resolve) => {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.onend = utterance.onerror = () => resolve();
-    signal.addEventListener('abort', () => { synth.cancel(); resolve(); }, { once: true });
+    signal.addEventListener(
+      'abort',
+      () => {
+        synth.cancel();
+        resolve();
+      },
+      { once: true },
+    );
     synth.speak(utterance);
   });
 }
@@ -149,7 +165,10 @@ export async function startOpenVoiceTransport({
       redirect: 'error',
     });
     const data = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(data?.error || `Transcription failed: HTTP ${response.status}`);
+    if (!response.ok)
+      throw new Error(
+        data?.error || `Transcription failed: HTTP ${response.status}`,
+      );
     return String(data?.text || '');
   }
 
@@ -165,12 +184,22 @@ export async function startOpenVoiceTransport({
         cache: 'no-store',
         redirect: 'error',
       });
-      if (!response.ok) throw new Error(`Speech synthesis failed: HTTP ${response.status}`);
+      if (!response.ok)
+        throw new Error(`Speech synthesis failed: HTTP ${response.status}`);
       const provider = response.headers.get('X-GEV-TTS-Provider') || 'hosted';
-      const buffer = await outContext.decodeAudioData(await response.arrayBuffer());
-      return { buffer, provider, synthMs: Math.round(performance.now() - started) };
+      const buffer = await outContext.decodeAudioData(
+        await response.arrayBuffer(),
+      );
+      return {
+        buffer,
+        provider,
+        synthMs: Math.round(performance.now() - started),
+      };
     } catch (error) {
-      if (!abort.aborted) debugLog('open_voice.tts.failed', { error: error?.message || String(error) });
+      if (!abort.aborted)
+        debugLog('open_voice.tts.failed', {
+          error: error?.message || String(error),
+        });
       return null;
     }
   }
@@ -179,7 +208,11 @@ export async function startOpenVoiceTransport({
     speechController?.abort();
     speechController = null;
     for (const source of sources) {
-      try { source.stop(); } catch { /* already stopped */ }
+      try {
+        source.stop();
+      } catch {
+        /* already stopped */
+      }
     }
     sources.clear();
     globalThis.speechSynthesis?.cancel?.();
@@ -192,7 +225,10 @@ export async function startOpenVoiceTransport({
       source.buffer = buffer;
       source.connect(output);
       sources.add(source);
-      source.onended = () => { sources.delete(source); resolve(); };
+      source.onended = () => {
+        sources.delete(source);
+        resolve();
+      };
       abort.addEventListener('abort', () => resolve(), { once: true });
       source.start();
     });
@@ -213,17 +249,30 @@ export async function startOpenVoiceTransport({
       for (let i = 0; i < chunks.length && !abort.aborted; i += 1) {
         playingUntil = Infinity;
         const current = next;
-        next = hosted && i + 1 < chunks.length ? synthesize(chunks[i + 1], abort) : null;
-        let clip = current ? await withDeadline(current, SYNTH_DEADLINE_MS) : null;
+        next =
+          hosted && i + 1 < chunks.length
+            ? synthesize(chunks[i + 1], abort)
+            : null;
+        let clip = current
+          ? await withDeadline(current, SYNTH_DEADLINE_MS)
+          : null;
         if (current && !clip && !hasBrowserVoice()) clip = await current; // no fallback voice: wait it out
         if (current && !clip) {
           hosted = false;
           next = null;
-          current.then((late) => late && debugLog('open_voice.tts.late', { synthMs: late.synthMs }));
+          current.then(
+            (late) =>
+              late &&
+              debugLog('open_voice.tts.late', { synthMs: late.synthMs }),
+          );
         }
         if (abort.aborted) break;
         const voice = clip ? clip.provider : 'browser';
-        debugLog('open_voice.spoke', { voice, chars: chunks[i].length, synthMs: clip?.synthMs ?? null });
+        debugLog('open_voice.spoke', {
+          voice,
+          chars: chunks[i].length,
+          synthMs: clip?.synthMs ?? null,
+        });
         if (clip) await playBuffer(clip.buffer, abort);
         else await speakWithBrowser(chunks[i], abort);
       }
@@ -244,17 +293,27 @@ export async function startOpenVoiceTransport({
     });
     const data = await response.json().catch(() => null);
     if (!response.ok || !data?.message)
-      throw new Error(data?.error || `Open voice request failed: HTTP ${response.status}`);
-    debugLog('open_voice.respond', { provider: data.provider || null, toolCalls: data.message.tool_calls?.length || 0 });
+      throw new Error(
+        data?.error || `Open voice request failed: HTTP ${response.status}`,
+      );
+    debugLog('open_voice.respond', {
+      provider: data.provider || null,
+      toolCalls: data.message.tool_calls?.length || 0,
+    });
     return data.message;
   }
 
-  const peer = createOpenVoicePeer({ respond, speech: { speak, stop: stopSpeech } });
+  const peer = createOpenVoicePeer({
+    respond,
+    speech: { speak, stop: stopSpeech },
+  });
 
   // Microphone → detector → Whisper → peer.
   const detector = createSpeechDetector({ sampleRate: TARGET_RATE });
   let transcribing = Promise.resolve();
-  const tapUrl = URL.createObjectURL(new Blob([TAP_WORKLET], { type: 'text/javascript' }));
+  const tapUrl = URL.createObjectURL(
+    new Blob([TAP_WORKLET], { type: 'text/javascript' }),
+  );
   try {
     await micContext.audioWorklet.addModule(tapUrl);
   } finally {
@@ -284,7 +343,9 @@ export async function startOpenVoiceTransport({
         try {
           text = cleanTranscript(await transcribe(audio), { seconds });
         } catch (error) {
-          debugLog('open_voice.stt.failed', { error: error?.message || String(error) });
+          debugLog('open_voice.stt.failed', {
+            error: error?.message || String(error),
+          });
         }
         if (!disposed) peer.userTranscript(text);
       });

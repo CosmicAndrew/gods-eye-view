@@ -210,7 +210,11 @@ test('the HUD summary route throttles the paid path, never the free one', async 
   // HUD away from an unconfigured install. Same exhausted client, no key.
   delete process.env.OPENAI_API_KEY;
   // The HUD also falls back to these; a key in the shell would make it paid.
-  for (const name of ['GEMINI_API_KEY', 'DEEPSEEK_API_KEY', 'OPENROUTER_API_KEY'])
+  for (const name of [
+    'GEMINI_API_KEY',
+    'DEEPSEEK_API_KEY',
+    'OPENROUTER_API_KEY',
+  ])
     env(t, name, undefined);
   const free = await request(handleHudSummary, { remoteAddress: from });
   assert.equal(free.status, 200, 'the free path answers past a spent budget');

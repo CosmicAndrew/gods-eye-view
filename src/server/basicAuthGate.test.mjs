@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { basicAuthGate } from './basicAuthGate.js';
+import { basicAuthGate } from '../../server/standalone/basic-auth-gate.js';
 
 /** Install the plugin on a fake server and return the registered handlers. */
 function install(plugin, hook = 'configureServer') {

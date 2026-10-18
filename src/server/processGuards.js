@@ -20,13 +20,18 @@ const INSTALLED = Symbol.for('gev.processGuards.installed');
 /**
  * @param {{proc?: NodeJS.Process, log?: (msg: string) => void, onShutdown?: () => Promise<void> | void}} options
  */
-export function installProcessGuards({ proc = process, log = console.error, onShutdown } = {}) {
+export function installProcessGuards({
+  proc = process,
+  log = console.error,
+  onShutdown,
+} = {}) {
   // Vite restarts the dev server in-process on config change while module state
   // survives; without this each reload stacks another set of handlers.
   if (proc[INSTALLED]) return proc;
   proc[INSTALLED] = true;
 
-  const describe = (error) => (error instanceof Error ? `${error.message}\n${error.stack}` : String(error));
+  const describe = (error) =>
+    error instanceof Error ? `${error.message}\n${error.stack}` : String(error);
 
   proc.on('unhandledRejection', (reason) => {
     log(`[gev] unhandled rejection (kept alive): ${describe(reason)}`);

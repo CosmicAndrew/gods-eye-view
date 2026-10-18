@@ -28,9 +28,11 @@
  */
 function canonicalizeAddress(value) {
   let address = value.trim().toLowerCase();
-  if (address.startsWith('::ffff:') && address.includes('.')) address = address.slice('::ffff:'.length);
+  if (address.startsWith('::ffff:') && address.includes('.'))
+    address = address.slice('::ffff:'.length);
   // Strip a port only from IPv4 - a bare colon in IPv6 is part of the address.
-  if (/^\d{1,3}(\.\d{1,3}){3}:\d+$/.test(address)) address = address.split(':')[0];
+  if (/^\d{1,3}(\.\d{1,3}){3}:\d+$/.test(address))
+    address = address.split(':')[0];
   return address;
 }
 
@@ -48,7 +50,9 @@ function normalizeHops(value) {
  */
 export function clientKeyFrom(req, trustedProxyHops = 0) {
   const rawSocket = req?.socket?.remoteAddress;
-  const socketKey = rawSocket ? canonicalizeAddress(String(rawSocket)) : 'local';
+  const socketKey = rawSocket
+    ? canonicalizeAddress(String(rawSocket))
+    : 'local';
   const hops = normalizeHops(trustedProxyHops);
   if (hops === 0) return socketKey;
 

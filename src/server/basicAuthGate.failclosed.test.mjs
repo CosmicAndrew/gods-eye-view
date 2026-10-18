@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { basicAuthGate } from './basicAuthGate.js';
+import { basicAuthGate } from '../../server/standalone/basic-auth-gate.js';
 
 function install(plugin) {
   const handlers = [];

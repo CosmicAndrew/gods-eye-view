@@ -4,7 +4,14 @@
 
 // Whisper's well-known outputs for silence or noise on short clips.
 const SHORT_CLIP_HALLUCINATIONS = new Set([
-  'thank you', 'thanks', 'thank you for watching', 'thanks for watching', 'bye', 'you', 'okay', 'so',
+  'thank you',
+  'thanks',
+  'thank you for watching',
+  'thanks for watching',
+  'bye',
+  'you',
+  'okay',
+  'so',
 ]);
 
 /**
@@ -19,7 +26,10 @@ export function cleanTranscript(text, { seconds = Infinity } = {}) {
     .replace(/\s+/g, ' ')
     .trim();
   if (!/[\p{L}\p{N}]/u.test(cleaned)) return '';
-  const bare = cleaned.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').trim();
+  const bare = cleaned
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .trim();
   if (seconds < 1.2 && SHORT_CLIP_HALLUCINATIONS.has(bare)) return '';
   return cleaned;
 }
@@ -35,7 +45,10 @@ const MAX_CHUNK = 220;
  * @returns {string[]}
  */
 export function speechChunks(text) {
-  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+  const words = String(text || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
   const chunks = [];
   let current = '';
   for (const word of words) {
