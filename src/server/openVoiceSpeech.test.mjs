@@ -95,7 +95,7 @@ test('transcribe hides upstream wording behind a generic 502', async (t) => {
   assert.doesNotMatch(JSON.stringify(reply.json), /org_123/);
 });
 
-test('speak uses Fish Audio S2 Pro first and names the provider', async (t) => {
+test('speak uses Fish Audio S2.1 Pro (free tier) first and names the provider', async (t) => {
   setEnv(t, { FISH_API_KEY: 'fish-fixture', DEEPINFRA_API_KEY: 'di-fixture' });
   const calls = [];
   t.mock.method(globalThis, 'fetch', async (url, init) => {
@@ -108,7 +108,7 @@ test('speak uses Fish Audio S2 Pro first and names the provider', async (t) => {
   assert.equal(reply.headers['x-gev-tts-provider'], 'fish');
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'https://api.fish.audio/v1/tts');
-  assert.equal(calls[0].init.headers.model, 's2-pro');
+  assert.equal(calls[0].init.headers.model, 's2.1-pro-free');
   assert.equal(calls[0].body.text, 'Flying to Paris.');
 });
 

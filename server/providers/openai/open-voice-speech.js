@@ -24,7 +24,7 @@ const TTS_PROVIDERS = {
     keyEnv: 'FISH_API_KEY',
     request: (text, key) => ({
       url: 'https://api.fish.audio/v1/tts',
-      headers: { Authorization: `Bearer ${key}`, model: process.env.GEV_VOICE_FISH_MODEL || 's2-pro' },
+      headers: { Authorization: `Bearer ${key}`, model: process.env.GEV_VOICE_FISH_MODEL || 's2.1-pro-free' },
       body: {
         text,
         format: 'mp3',
