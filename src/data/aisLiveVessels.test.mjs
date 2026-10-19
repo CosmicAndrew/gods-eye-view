@@ -73,6 +73,20 @@ test('snapshot classification distinguishes raw rows from accepted vessel positi
   assert.equal(snapshot.error, null);
 });
 
+test('an unconfigured AIS key surfaces keyRequired, not a generic error', () => {
+  // The server sends keyRequired on its 503 when AISSTREAM_API_KEY is unset.
+  // Without this the layer reported a plain error and poisoned the global
+  // loading chip into "LOAD FAILED" - the FIRMS layer already models this.
+  const snapshot = classifyAisFeedSnapshot({ status: 'no_key', keyRequired: true, rows: [] });
+  assert.equal(snapshot.keyRequired, true);
+  assert.equal(snapshot.error, 'KEY REQUIRED');
+});
+
+test('a normally-empty feed is not treated as key-required', () => {
+  const snapshot = classifyAisFeedSnapshot({ status: 'connecting', rows: [] });
+  assert.notEqual(snapshot.keyRequired, true);
+});
+
 test('raw rows that all fail normalization do not satisfy AIS product health', () => {
   const snapshot = classifyAisFeedSnapshot({
     status: 'open',
@@ -1600,6 +1614,31 @@ test('vessel interaction wire: a sibling-owned pick wins without selection mutat
   }
 });
 
+for (const card of ['live', 'stale', 'absent', 'covered']) {
+  test(`vessel interaction wire: ${card} foreground card over registered cyclone`, () => {
+    const id = 'cyclone:fixture:cone:0';
+    registerPickOwner('weather-cyclones', (pickedId) => pickedId === id);
+    const harness = installWireHarness({ id });
+    const requests = [];
+    harness.windowTarget.addEventListener(WORLD_FOCUS_REQUEST_EVENT, (event) => requests.push(event.detail));
+    const host = hostWithCardHit(card === 'live' ? `vessel:${harness.record.mmsi}` : card === 'stale' ? 'vessel:999999999' : null);
+    if (card === 'covered') host.hitTest = (_x, _y, options) => {
+      assert.equal(options?.sourceId, undefined, 'test topmost host hit, not a covered AIS card');
+      return { sourceId: 'cctv', entryId: 'vessel:999999999' };
+    };
+    _setVesselOverlayHostForTest(host);
+    try {
+      harness.handler.click({ position: { x: 10, y: 20 } });
+      assert.equal(aisLiveVesselsLayer.getSelectedInfo()?.mmsi, harness.record.mmsi);
+      assert.equal(requests.length, card === 'live' ? 1 : 0);
+    } finally {
+      _setVesselOverlayHostForTest(null);
+      harness.cleanup();
+      unregisterPickOwner('weather-cyclones');
+    }
+  });
+}
+
 test('vessel card policy: only MMSI-keyed cards publish a hit rect', () => {
   const keyed = applyVesselOverlayPolicy(buildVesselCard(makeRecord()));
   assert.equal(keyed.interactive, true);
@@ -1640,4 +1679,29 @@ test('a vessel analyst record carries the MMSI the tracker keys on', () => {
   const nameless = mapAnalystRecord({ mmsi: '366999124', name: null, lat: 37.9, lon: -122.5 });
   assert.equal(nameless.id, '366999124');
   assert.equal(nameless.mmsi, '366999124');
+});
+
+test('vessel selection passes the opaque source reference to optional history', async () => {
+  const { createVesselSource } = await import('../sources/live/standalone.js');
+  _setVesselStateForTest({ enabled: false });
+  const requests = [];
+  aisLiveVesselsLayer.setSource({
+    label: 'Test vessel source',
+    getSnapshot: async () => ({ records: [] }),
+    getTrack: async (reference, options) => { requests.push({ reference, options }); return { records: [] }; },
+  });
+  const harness = installWireHarness(undefined, { selectedRecord: null, trailMmsi: null });
+  try {
+    harness.record.reference = 'opaque:test-reference';
+    assert.equal(aisLiveVesselsLayer.selectById(harness.record.mmsi), true);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].reference, 'opaque:test-reference');
+    assert.ok(requests[0].options.signal instanceof AbortSignal);
+    assert.equal(aisLiveVesselsLayer.source, 'Test vessel source');
+  } finally {
+    harness.cleanup();
+    _setVesselStateForTest({ enabled: false });
+    aisLiveVesselsLayer.setSource(createVesselSource());
+  }
 });

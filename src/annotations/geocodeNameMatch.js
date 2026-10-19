@@ -1,0 +1,115 @@
+/**
+ * Did the geocoder echo back the name the user actually gave?
+ *
+ * The resolver rejects a geocoded point that sits far from the current view,
+ * which is right when a vague local ask resolves to a distant wrong thing —
+ * "the Texas Capitol" coming back as the STATE of Texas. It is wrong when the
+ * user named a place in full and the geocoder returned exactly that place:
+ * marking LAX from a camera over Texas is not a mis-match, it is the request.
+ * That case was rejected at 1991km against a 50km limit and reported to the
+ * user as "nothing could be marked".
+ *
+ * A name echo alone is not enough: "Empire State" geocodes to an exact echo
+ * while meaning the Building, and the resolver deliberately keeps that on the
+ * near-view recovery path. So the bypass also requires the geocoder's own type
+ * to name an unambiguous transport hub - the class the launch demo marks and
+ * the class whose full name admits no second reading.
+ */
+
+/** Geocode types whose named facility is unambiguous wherever the camera is. */
+const UNAMBIGUOUS_TYPES = new Set([
+  'airport',
+  'international_airport',
+  'transit_station',
+  'train_station',
+  'bus_station',
+  'subway_station',
+  'ferry_terminal',
+]);
+
+/** Lowercase, drop a leading article, strip punctuation and parenthetical codes. */
+function normalize(value) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ') // "(LAX)" is a code, not part of the name
+    .replace(/^\s*the\s+/, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+const tokens = (value) => normalize(value).split(' ').filter(Boolean);
+
+/**
+ * @param {string} query        what the user asked for
+ * @param {string} primaryName  the geocoder's canonical name for what it found
+ * @param {string[]} [types]    the geocoder's types for that result
+ * @returns {boolean} true when the result is an unambiguous echo of the ask and
+ *   may skip the proximity gate; false whenever the gate should still apply.
+ */
+/**
+ * The locality the ask names for itself, if any: "Presidio, San Francisco" or
+ * "the Presidio in San Francisco". Returns the ask with that qualifier removed,
+ * or null when the ask carries none.
+ */
+function askWithoutLocality(query) {
+  const raw = String(query ?? '').trim();
+  if (!raw) return null;
+  const comma = raw.lastIndexOf(',');
+  if (comma > 0) return raw.slice(0, comma);
+  const inMatch = raw.match(/^(.*\S)\s+in\s+\S.*$/i);
+  return inMatch ? inMatch[1] : null;
+}
+
+export function geocodeNameConfidentlyMatches(query, primaryName, types = []) {
+  // An ask that names its own locality has already answered the question the
+  // proximity gate exists to ask. The gate is a stand-in for "roughly where are
+  // we" — when the user says "Presidio, San Francisco" the camera has nothing
+  // to add, and refusing costs them the request: measured, that exact ask from
+  // a camera over Austin was refused as 2431km drift, while the same words with
+  // the camera over San Francisco traced a 196-point perimeter.
+  //
+  // The geocoder must still have returned what was asked for. It may ADD detail
+  // ("Presidio" -> "Presidio of San Francisco"); it may not drop it, so
+  // "the Texas Capitol, Austin" -> "Texas" stays gated exactly as before.
+  const core = askWithoutLocality(query);
+  if (core) {
+    const coreTokens = tokens(core);
+    const gotTokens = tokens(primaryName);
+    if (coreTokens.length && gotTokens.length) {
+      const got = new Set(gotTokens);
+      if (coreTokens.every((token) => got.has(token))) return true;
+    }
+  }
+
+  if (
+    !Array.isArray(types) ||
+    !types.some((t) => UNAMBIGUOUS_TYPES.has(String(t)))
+  )
+    return false;
+
+  // A bare code echoes the whole ask: "annotate LAX" against a geocoder result
+  // of "... (LAX)". The type gate above already confirmed a transport hub, so a
+  // code that equals the ask is unambiguous. Checked before the parens are
+  // stripped, since that is where the code lives.
+  const askJoined = tokens(query).join(' ');
+  const codes = [...String(primaryName ?? '').matchAll(/\(([^)]+)\)/g)].map(
+    (m) => m[1],
+  );
+  if (askJoined && codes.some((c) => tokens(c).join(' ') === askJoined))
+    return true;
+
+  const askTokens = tokens(query);
+  const gotTokens = tokens(primaryName);
+  if (!askTokens.length || !gotTokens.length) return false;
+
+  // An exact echo is unambiguous at any distance, including a single word.
+  if (askTokens.join(' ') === gotTokens.join(' ')) return true;
+
+  // Otherwise the canonical name has to account for the ask rather than a
+  // fragment of it. One token out of several is the "Texas Capitol" → "Texas"
+  // shape the gate is there to catch, so it stays gated.
+  if (gotTokens.length < 2) return false;
+
+  const ask = new Set(askTokens);
+  return gotTokens.every((token) => ask.has(token));
+}

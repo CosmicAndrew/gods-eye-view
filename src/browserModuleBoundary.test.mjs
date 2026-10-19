@@ -6,13 +6,27 @@ import { fileURLToPath } from 'node:url';
 
 const SRC_ROOT = fileURLToPath(new URL('.', import.meta.url));
 
+/**
+ * Directories under src/ that Vite never builds for the browser.
+ *
+ * src/server/ is this deployment's HTTP layer — the auth gate, the rate-limit
+ * client key, the immutable-asset headers, the process guards. Only
+ * vite.config.js imports them, so `node:crypto` and friends there are correct,
+ * not a leak; nothing under src/server/ appears in dist/assets. Without this
+ * the rule would read "no Node imports anywhere", which would be a different
+ * and false claim.
+ */
+const NODE_ONLY_DIRECTORIES = new Set(['server']);
+
 /** Every browser-built module under src/ — the test files are Node-only. */
 function browserModules(directory = SRC_ROOT) {
   const files = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const absolute = path.join(directory, entry.name);
-    if (entry.isDirectory()) files.push(...browserModules(absolute));
-    else if (entry.isFile() && entry.name.endsWith('.js')) files.push(absolute);
+    if (entry.isDirectory()) {
+      if (directory === SRC_ROOT && NODE_ONLY_DIRECTORIES.has(entry.name)) continue;
+      files.push(...browserModules(absolute));
+    } else if (entry.isFile() && entry.name.endsWith('.js')) files.push(absolute);
   }
   return files.sort();
 }
@@ -22,7 +36,7 @@ test('no browser-built module imports a Node core module', () => {
   // import survives the build and turns into a runtime failure the moment the
   // guard around it is wrong. src/data/naturalEarthRegions.js and
   // src/data/neighborhoodPolygons.js both carried one to read their bundled
-  // JSON packs under node:test; an import attribute serves both runtimes.
+  // JSON packs under node:test; src/data/bundledJson.js now serves both runtimes.
   const offenders = [];
   for (const file of browserModules()) {
     const source = readFileSync(file, 'utf8');

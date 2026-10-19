@@ -1,0 +1,11 @@
+# Cloud Build uploads this directory before building. Without this file gcloud
+# falls back to .gitignore, which keeps docs/media - 68MB of demo GIFs that the
+# image never uses and that dominate the upload on a slow link.
+.git
+node_modules
+dist
+.env
+.gev-cache
+qa-shots
+docs/media
+*.log
