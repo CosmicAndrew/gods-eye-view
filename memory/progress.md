@@ -33,3 +33,8 @@
 - Merged upstream main 93ea088f (65 commits). Auth gate moved to server/standalone/basic-auth-gate.js (node:crypto under src/ failed check:boundaries); our modules registered in package-boundaries.json; formatter run.
 - All CI gates green locally: 7871 tests 0 fail, build, check:boundaries, format:check, layer-token, qa:panel-resize, qa:street-level:fixtures 39/39. Paris open-voice harness PASS.
 - Live: 401/200 on both hostnames, speak 200 via fish. Branch pushed to CosmicAndrew/gods-eye-view (Andrew's fork); origin (upstream) is read-only and untouched.
+
+## 2026-10-24 - v20 live (revision gods-eye-view-00024-k7k)
+- New gate password (old one rejected, 401); FIRMS 200 with live VIIRS rows; AISStream ships 200; Google text search 200 on GOOGLE_MAPS_SERVER_API_KEY.
+- Browser Maps key now referrer-restricted: tiles 200 with the site referrer, 403 with a foreign one.
+- Open: server key lacks Geocoding API (Google "not authorized"); the app falls through to the next geocoder until it is ticked.
