@@ -37,4 +37,4 @@
 ## 2026-10-24 - v20 live (revision gods-eye-view-00024-k7k)
 - New gate password (old one rejected, 401); FIRMS 200 with live VIIRS rows; AISStream ships 200; Google text search 200 on GOOGLE_MAPS_SERVER_API_KEY.
 - Browser Maps key now referrer-restricted: tiles 200 with the site referrer, 403 with a foreign one.
-- Open: server key lacks Geocoding API (Google "not authorized"); the app falls through to the next geocoder until it is ticked.
+- Server key Geocoding API added 2026-10-24; live geocode "Paris" returns OK.
