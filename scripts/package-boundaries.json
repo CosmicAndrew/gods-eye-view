@@ -1686,6 +1686,7 @@
       "src/annotations/annotationResolver.js",
       "src/annotations/hybridAnnotationRenderer.js",
       "src/annotations/index.js",
+      "src/annotations/outlineSource.js",
       "src/annotations/resolver.js",
       "src/annotations/geocodeNameMatch.js",
       "src/annotations/screenAnnotationRenderer.js",
@@ -2542,6 +2543,7 @@
       "src/data/bhoteKoshiShotPaths.js",
       "src/geoDistance.js",
       "src/annotations/annotationResolver.js",
+      "src/annotations/outlineSource.js",
       "src/annotations/resolver.js",
       "src/annotations/geocodeNameMatch.js",
       "src/app/catalog.js",
@@ -3097,6 +3099,7 @@
     "exports": ["./application/operations"],
     "modules": [
       "src/annotations/annotationResolver.js",
+      "src/annotations/outlineSource.js",
       "src/annotations/resolver.js",
       "src/annotations/geocodeNameMatch.js",
       "src/app/operations.js",
