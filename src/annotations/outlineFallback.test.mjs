@@ -90,6 +90,18 @@ test('an unconfigured Overpass falls back to the outline source', async () => {
   assert.ok(Math.abs(outline.lat - 40.782) < 0.02, 'recentred on the park');
 });
 
+// "Highlight the perimeter of the property" at a house drew a ~50 m tinted
+// column: a building footprint renders as an extruded volume. A fallback
+// outline carries no height, so it is always drawn flat on the ground.
+test('a building outline from the fallback is drawn on the ground', async () => {
+  const { resolve } = harness({
+    outline: { ring: PARK_RING, kind: 'building', name: 'House' },
+  });
+  const { outline } = await resolve('Central Park, New York');
+  assert.ok(outline?.ring?.length >= 4);
+  assert.equal(outline.footprintKind, 'area');
+});
+
 test('no fallback outline keeps the honest unavailable result', async () => {
   const { resolve } = harness({ outline: null });
   const { outline } = await resolve('Central Park, New York');

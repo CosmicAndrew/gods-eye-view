@@ -759,7 +759,9 @@ export function createAnnotationResolver({
       return finishOutline(
         {
           ring,
-          kind: fallback.kind === 'building' ? 'building' : 'area',
+          // Always 'area': with no height a building would extrude as a
+          // ~50 m column, and the ask is a perimeter on the ground.
+          kind: 'area',
           heightM: null,
         },
         baseScope,

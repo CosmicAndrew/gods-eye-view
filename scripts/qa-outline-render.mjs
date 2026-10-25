@@ -121,6 +121,7 @@ try {
       ringPoints: Array.isArray(a.ring) ? a.ring.length : null,
       pendingOutline: Boolean(a.pendingOutline),
       synthesized: Boolean(a.synthesized),
+      footprintKind: a.footprintKind || null,
     })),
   }));
 
@@ -132,11 +133,33 @@ try {
       : m.synthesized ? 'SYNTHESIZED BLOB - not a real boundary'
       : 'BARE POINT - no perimeter';
     if (m.ringPoints) traced += 1;
-    console.log(`  ${JSON.stringify(m.label)} [${m.type}] -> ${verdict}`);
+    console.log(`  ${JSON.stringify(m.label)} [${m.type}${m.footprintKind ? `, drawn as ${m.footprintKind}` : ""}] -> ${verdict}`);
   }
   if (!marks.marks.length) console.log('  (no marks on the board)');
   for (const e of marks.events) {
     console.log(`  event: ${JSON.stringify(e.label)} ${e.status}${e.approximate ? ' (approximate)' : ''}`);
+  }
+
+  const shot = arg('--shot', null);
+  if (shot) {
+    // Close the first-launch dialog and look at the mark from an oblique view,
+    // where an outline floating above the tiles separates from the ground.
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => {
+      const v = window.__godsEyeView.viewer;
+      const mark = window.__godsEyeView.annotations.list().find((a) => a.ring);
+      if (!mark) return;
+      const lon = mark.ring.reduce((s, p) => s + p[0], 0) / mark.ring.length;
+      const lat = mark.ring.reduce((s, p) => s + p[1], 0) / mark.ring.length;
+      v.camera.cancelFlight?.();
+      v.camera.setView({
+        destination: window.Cesium.Cartesian3.fromDegrees(lon, lat - 0.035, 1800),
+        orientation: { heading: 0, pitch: window.Cesium.Math.toRadians(-35), roll: 0 },
+      });
+    });
+    await new Promise((r) => setTimeout(r, 12000));
+    await page.screenshot({ path: shot });
+    console.log(`  screenshot: ${shot}`);
   }
 
   console.log(`\nRESULT: ${traced}/${targets.length} traced a real perimeter`);
