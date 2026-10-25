@@ -104,14 +104,6 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/scripts/pinokio-environment.mjs ./scripts/pinokio-environment.mjs
 COPY --from=build /app/scripts/google-server-key.mjs ./scripts/google-server-key.mjs
 
-# Seed the proxy's disk cache with orbital elements. celestrak.org is globally
-# unreachable and has no working mirror, so a fresh container answered every
-# /api/celestrak/* with 502 and the satellite layer rendered nothing - the
-# proxy serves stale on upstream failure, but had nothing stale to serve. The
-# moment celestrak answers again these are overwritten with fresh data. See
-# seed-cache/README.md.
-COPY --from=build /app/seed-cache/celestrak-*.json ./.gev-cache/
-
 # The port is read from $PORT at runtime (see the `preview` block in
 # server/standalone/vite.config.js).
 EXPOSE 4173

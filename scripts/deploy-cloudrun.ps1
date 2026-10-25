@@ -18,7 +18,7 @@ param(
   [string]$Project = 'project-494b9eee-ced6-4525-aa8',
   [string]$Region  = 'us-central1',
   [string]$Service = 'gods-eye-view',
-  [string]$Image   = 'us-central1-docker.pkg.dev/project-494b9eee-ced6-4525-aa8/gev/gods-eye-view:v19'
+  [string]$Image   = 'us-central1-docker.pkg.dev/project-494b9eee-ced6-4525-aa8/gev/gods-eye-view:v20'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -100,7 +100,7 @@ $code = try { (Invoke-WebRequest $url -TimeoutSec 30 -SkipHttpErrorCheck).Status
 Write-Host ""
 Write-Host "URL: $url" -ForegroundColor Green
 if ($code -eq 401) {
-  Write-Host "GATE CLOSED (401). Sign in as $($vars['GEV_AUTH_USER']) / $($vars['GEV_AUTH_PASSWORD'])" -ForegroundColor Green
+  Write-Host "GATE CLOSED (401). Sign in as $($vars['GEV_AUTH_USER']) with GEV_AUTH_PASSWORD from .env" -ForegroundColor Green
 } elseif ($code -eq 200) {
   Write-Warning 'PUBLIC (200) - the auth gate did NOT arm. Do not share this URL; check GEV_AUTH_* on the service.'
 } else {

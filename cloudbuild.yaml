@@ -27,7 +27,7 @@ steps:
 images:
   - ${_IMAGE}
 substitutions:
-  _IMAGE: us-central1-docker.pkg.dev/project-494b9eee-ced6-4525-aa8/gev/gods-eye-view:v19
+  _IMAGE: us-central1-docker.pkg.dev/project-494b9eee-ced6-4525-aa8/gev/gods-eye-view:v20
   _GOOGLE_MAPS_API_KEY: ''
   _CESIUM_ION_TOKEN: ''
 options:
