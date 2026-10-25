@@ -40,3 +40,5 @@
 - Server key Geocoding API added 2026-10-24; live geocode "Paris" returns OK.
 
 - 2026-10-24: Traced perimeters restored. Upstream (#742) left Overpass unconfigured by default and public instances refuse traffic, so every area annotation stayed a point. Added `/api/geocode/outline` (Nominatim polygons on the shared 1 req/s queue, name-matched to the ask) as the resolver fallback when Overpass is unavailable. qa-outline-render 2/2 traced; 7877 tests pass.
+
+- 2026-10-25: Open voice pacing and turn log (not yet deployed). Live v22 speak calls ran up to 6.8 s, past the client's 4 s deadline; a first chunk that slow hands the rest of the reply to the browser voice. `speechChunks` now caps the opening chunk at 80 chars and each later one at 80 + 3x the chunk before, cut at a clause (Fish measured 0.8 s + 23 ms/char; 83 chars = 2.3-2.6 s). With GEV_VOICE_LOG_CONTENT=1, /api/voice/open/respond prints one `open_voice.turn` JSON line per turn (heard, reply, tool calls) to stdout, which Cloud Logging keeps. 7882 pass 0 fail, build, boundaries, format OK; qa-open-voice PASS locally (fish, first chunk after 1.0 s).

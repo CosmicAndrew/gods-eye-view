@@ -132,6 +132,47 @@ function toChatMessages(messages) {
   return out;
 }
 
+const LOGGED_TEXT_MAX = 2000;
+const clip = (text) =>
+  text.length > LOGGED_TEXT_MAX ? `${text.slice(0, LOGGED_TEXT_MAX)}…` : text;
+
+/**
+ * One turn as a single JSON line: what reached the model since it last spoke
+ * (the operator's words or tool results) and what it answered. Cloud Run keeps
+ * stdout in Cloud Logging, where `severity` and `message` are read as such.
+ */
+function turnLogLine(messages, provider, reply) {
+  const last = messages.findLastIndex(
+    (message) => message.role === 'assistant',
+  );
+  const toolNames = new Map(
+    (messages[last]?.tool_calls ?? []).map((call) => [
+      call.id,
+      call.function.name,
+    ]),
+  );
+  const heard = messages.slice(last + 1).map((message) =>
+    message.role === 'tool'
+      ? {
+          tool: toolNames.get(message.tool_call_id) ?? null,
+          result: clip(message.content),
+        }
+      : { said: clip(message.content) },
+  );
+  return JSON.stringify({
+    severity: 'INFO',
+    message: `open voice turn (${provider})`,
+    event: 'open_voice.turn',
+    provider,
+    heard,
+    reply: clip(reply.content),
+    tool_calls: reply.tool_calls.map((call) => ({
+      name: call.name,
+      arguments: clip(call.arguments),
+    })),
+  });
+}
+
 function answer(res, status, payload) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -141,9 +182,15 @@ function answer(res, status, payload) {
 
 /**
  * POST { messages, instructions?, toolChoice? } → { message: { content, tool_calls } }.
- * @param {{ tools: object[], instructions: () => string }} options
+ * With GEV_VOICE_LOG_CONTENT=1 each turn is also logged (turnLogLine); off by
+ * default, like the debug log's content, because it retains what was said.
+ * @param {{ tools: object[], instructions: () => string, logTurns?: boolean }} options
  */
-function createOpenVoiceRespondHandler({ tools, instructions }) {
+function createOpenVoiceRespondHandler({
+  tools,
+  instructions,
+  logTurns = process.env.GEV_VOICE_LOG_CONTENT === '1',
+}) {
   const chatTools = toChatTools(tools);
   return async (req, res) => {
     if (req.method !== 'POST')
@@ -203,13 +250,12 @@ function createOpenVoiceRespondHandler({ tools, instructions }) {
             name: call.function.name,
             arguments: String(call.function.arguments || '{}'),
           }));
-        return answer(res, 200, {
-          provider: name,
-          message: {
-            content: typeof message.content === 'string' ? message.content : '',
-            tool_calls: toolCalls,
-          },
-        });
+        const reply = {
+          content: typeof message.content === 'string' ? message.content : '',
+          tool_calls: toolCalls,
+        };
+        if (logTurns) console.log(turnLogLine(messages, name, reply));
+        return answer(res, 200, { provider: name, message: reply });
       } catch {
         console.warn(`[open-voice] ${name} request failed`);
       }
