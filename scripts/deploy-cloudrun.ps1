@@ -18,7 +18,7 @@ param(
   [string]$Project = 'project-494b9eee-ced6-4525-aa8',
   [string]$Region  = 'us-central1',
   [string]$Service = 'gods-eye-view',
-  [string]$Image   = 'us-central1-docker.pkg.dev/project-494b9eee-ced6-4525-aa8/gev/gods-eye-view:v21'
+  [string]$Image   = 'us-central1-docker.pkg.dev/project-494b9eee-ced6-4525-aa8/gev/gods-eye-view:v22'
 )
 
 $ErrorActionPreference = 'Stop'
