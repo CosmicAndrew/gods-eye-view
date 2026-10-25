@@ -38,3 +38,5 @@
 - New gate password (old one rejected, 401); FIRMS 200 with live VIIRS rows; AISStream ships 200; Google text search 200 on GOOGLE_MAPS_SERVER_API_KEY.
 - Browser Maps key now referrer-restricted: tiles 200 with the site referrer, 403 with a foreign one.
 - Server key Geocoding API added 2026-10-24; live geocode "Paris" returns OK.
+
+- 2026-10-24: Traced perimeters restored. Upstream (#742) left Overpass unconfigured by default and public instances refuse traffic, so every area annotation stayed a point. Added `/api/geocode/outline` (Nominatim polygons on the shared 1 req/s queue, name-matched to the ask) as the resolver fallback when Overpass is unavailable. qa-outline-render 2/2 traced; 7877 tests pass.

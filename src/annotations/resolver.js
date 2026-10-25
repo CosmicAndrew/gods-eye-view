@@ -28,6 +28,7 @@ import {
 import { unavailablePlaceSearch } from '../search/placeSearch.js';
 import { isPickedWorldPosition } from '../data/scenePick.js';
 import { geocodeNameConfidentlyMatches } from './geocodeNameMatch.js';
+import { fetchPlaceOutline } from './outlineSource.js';
 
 /** Ms the analyst region lookup waits on geocode + admin boundary. */
 export const REGION_FALLBACK_BUDGET_MS = 3_000;
@@ -48,6 +49,7 @@ export function createAnnotationResolver({
     boundarySource,
     signal: lifetime,
   }),
+  outlineSource = fetchPlaceOutline,
 } = {}) {
   requireFeatureSource(featureSource);
   lifetime?.throwIfAborted();
@@ -445,6 +447,51 @@ export function createAnnotationResolver({
     // they reach the real enclosing-polygon sweep even under `around_the_thing` phrasing.
     const groundsLike = isGroundsLikeAsk(target, labelHint, entityKind);
 
+    /** Validate a footprint against the scope cap and drift gate; resolveOutline's contract. */
+    const finishOutline = (fp, scope) => {
+      // Scope sanity: reject a real footprint whose area is wildly wrong for the asked
+      // scope (a building/compound/neighborhood intent must never draw a state-sized
+      // blob). Synthesized discs are deliberately sized and exempt.
+      if (
+        fp &&
+        !fp.synthesized &&
+        Array.isArray(fp.ring) &&
+        fp.ring.length >= 3 &&
+        exceedsScopeArea(fp, scope)
+      ) {
+        fp = null;
+      }
+      if (isUnavailableCapability(fp) || isRateLimitedOutcome(fp)) return fp;
+      if (fp === undefined) return undefined; // TRANSIENT — a backoff retry may still find it
+      if (!fp || !Array.isArray(fp.ring) || fp.ring.length < 3) return null;
+      const centroid = ringCentroid(fp.ring);
+      if (!centroid) return null;
+      // Same drift bound as the anchor gate, and the same bypass for a name
+      // that echoes the ask. If the name was trusted enough to place the anchor
+      // at this distance, its own footprint cannot be too far away by the same
+      // measure: the two gates disagreeing is how "outline the Presidio" from a
+      // camera over Austin put a point on the map and silently dropped its
+      // perimeter. A polygon whose centroid would drag an UNtrusted anchor out
+      // of plausibility is still the wrong feature — drop it, keep the point.
+      if (
+        fromGeocode &&
+        !bypassNearViewGuards &&
+        !allowDistant &&
+        !echoesTheAsk &&
+        gateDrift(centroid.lat, centroid.lon)
+      )
+        return null;
+      return {
+        ring: fp.ring,
+        footprintKind: fp.kind,
+        buildingHeight: fp.heightM,
+        synthesized: Boolean(fp.synthesized),
+        lat: centroid.lat,
+        lon: centroid.lon,
+        height: sampleGroundHeight(viewer, centroid.lon, centroid.lat),
+      };
+    };
+
     /**
      * Resolve the footprint/outline for this (already-gated) anchor. Reads the outer locals
      * but never mutates them — tri-state result:
@@ -460,7 +507,7 @@ export function createAnnotationResolver({
      * The inline path awaits it right here; progressive callers (deferFootprint) invoke it
      * AFTER the anchor mark is drawn and upgrade the mark in place.
      */
-    const resolveOutline = async () => {
+    const resolveOsmOutline = async () => {
       let scope = baseScope;
       const isAdmin =
         scope === 'country' ||
@@ -680,47 +727,43 @@ export function createAnnotationResolver({
           }
         }
       }
-      // Scope sanity: reject a real footprint whose area is wildly wrong for the asked
-      // scope (a building/compound/neighborhood intent must never draw a state-sized
-      // blob). Synthesized discs are deliberately sized and exempt.
+      return finishOutline(fp, scope);
+    };
+
+    // No Overpass endpoint (upstream's default since it stopped using the public
+    // instances): trace the outline from the outline source instead, through the
+    // same scope cap and drift gate. Without one, keep the honest unavailable.
+    const resolveOutline = async () => {
+      const fp = await resolveOsmOutline();
+      if (!isUnavailableCapability(fp)) return fp;
+      const fallback = await outlineSource({
+        query: target || matchName,
+        lat,
+        lon,
+        signal,
+      }).catch(() => null);
+      if (!Array.isArray(fallback?.ring) || fallback.ring.length < 3) return fp;
+      // A by-name search can return a same-named place elsewhere; the outline
+      // must hold the anchor, or sit beside it (a building's entrance pin).
+      const ring = closeRing([...fallback.ring]);
+      const centre = ringCentroid(ring);
       if (
-        fp &&
-        !fp.synthesized &&
-        Array.isArray(fp.ring) &&
-        fp.ring.length >= 3 &&
-        exceedsScopeArea(fp, scope)
-      ) {
-        fp = null;
-      }
-      if (isUnavailableCapability(fp) || isRateLimitedOutcome(fp)) return fp;
-      if (fp === undefined) return undefined; // TRANSIENT — a backoff retry may still find it
-      if (!fp || !Array.isArray(fp.ring) || fp.ring.length < 3) return null;
-      const centroid = ringCentroid(fp.ring);
-      if (!centroid) return null;
-      // Same drift bound as the anchor gate, and the same bypass for a name
-      // that echoes the ask. If the name was trusted enough to place the anchor
-      // at this distance, its own footprint cannot be too far away by the same
-      // measure: the two gates disagreeing is how "outline the Presidio" from a
-      // camera over Austin put a point on the map and silently dropped its
-      // perimeter. A polygon whose centroid would drag an UNtrusted anchor out
-      // of plausibility is still the wrong feature — drop it, keep the point.
-      if (
-        fromGeocode &&
-        !bypassNearViewGuards &&
-        !allowDistant &&
-        !echoesTheAsk &&
-        gateDrift(centroid.lat, centroid.lon)
+        !pointInPolygon(lon, lat, ring) &&
+        !(
+          centre &&
+          approximateDistanceM(lat, lon, centre.lat, centre.lon) <=
+            FALLBACK_OUTLINE_MAX_OFFSET_M
+        )
       )
         return null;
-      return {
-        ring: fp.ring,
-        footprintKind: fp.kind,
-        buildingHeight: fp.heightM,
-        synthesized: Boolean(fp.synthesized),
-        lat: centroid.lat,
-        lon: centroid.lon,
-        height: sampleGroundHeight(viewer, centroid.lon, centroid.lat),
-      };
+      return finishOutline(
+        {
+          ring,
+          kind: fallback.kind === 'building' ? 'building' : 'area',
+          heightM: null,
+        },
+        baseScope,
+      );
     };
 
     let ring = null;
@@ -799,6 +842,8 @@ export function createAnnotationResolver({
   // a label point (most US neighborhoods) or the user asks for the area AROUND a landmark.
   const NEIGHBORHOOD_RADIUS_M = 750; // urban-neighborhood blob (600–900 m band)
   const AROUND_LANDMARK_RADIUS_M = 400; // "the area around X" — a few blocks (300–500 m)
+  // How far a fallback outline's centre may sit from an anchor it does not contain.
+  const FALLBACK_OUTLINE_MAX_OFFSET_M = 1500;
   const GROUNDS_RADIUS_M = 300; // "X grounds/compound/campus" loose disc when OSM has no polygon
   const GROUNDS_RADIUS_MIN_M = 150; // viewport-derived grounds disc is clamped to this band so a tiny
   const GROUNDS_RADIUS_MAX_M = 1200; // place can't shrink to a dot, nor a city-wide viewport balloon

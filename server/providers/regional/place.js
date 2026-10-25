@@ -179,8 +179,151 @@ export function createNominatimSearchProvider({
 
 export const fetchNominatimSearch = createNominatimSearchProvider();
 
+const OUTLINE_MAX_VERTICES = 2000;
+
+const OUTLINE_STOP_WORDS = new Set(['the', 'of', 'and', 'at', 'in', 'a']);
+
+/** Lower-case name words, without stop words, for comparing a hit to the ask. */
+function words(text) {
+  return new Set(
+    String(text || '')
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((word) => word.length > 1 && !OUTLINE_STOP_WORDS.has(word)),
+  );
+}
+
+/** Outer ring of a GeoJSON Polygon/MultiPolygon, the largest part for a multi. */
+function outerRing(geometry) {
+  if (geometry?.type === 'Polygon') return geometry.coordinates?.[0] || null;
+  if (geometry?.type !== 'MultiPolygon') return null;
+  let best = null;
+  for (const polygon of geometry.coordinates || []) {
+    const ring = polygon?.[0];
+    if (Array.isArray(ring) && ring.length > (best?.length || 0)) best = ring;
+  }
+  return best;
+}
+
+function ringContains(ring, lon, lat) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (
+      yi > lat !== yj > lat &&
+      lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi
+    )
+      inside = !inside;
+  }
+  return inside;
+}
+
+function ringCentre(ring) {
+  let lon = 0;
+  let lat = 0;
+  for (const [x, y] of ring) {
+    lon += x;
+    lat += y;
+  }
+  return { lon: lon / ring.length, lat: lat / ring.length };
+}
+
+/**
+ * Choose the outline among Nominatim polygon hits: the one holding the
+ * anchor, else the nearest. Point-only hits (most POIs) carry no outline.
+ *
+ * @returns {{ ring: number[][], kind: 'building'|'area', name: string } | null}
+ */
+export function pickNominatimOutline(rows, lat, lon, query = '') {
+  // The feature part only: "Fort Worth Stockyards, Fort Worth, Texas" must not
+  // match a hit on "Texas".
+  const asked = words(String(query).split(',')[0]);
+  const candidates = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const ring = outerRing(row?.geojson);
+    if (!Array.isArray(ring) || ring.length < 4) continue;
+    const clean = ring
+      .filter((p) => Number.isFinite(p?.[0]) && Number.isFinite(p?.[1]))
+      .map(([x, y]) => [x, y]);
+    if (clean.length < 4 || clean.length > OUTLINE_MAX_VERTICES) continue;
+    const kind =
+      (row.category || row.class) === 'building' || row.type === 'building'
+        ? 'building'
+        : 'area';
+    const name = String(row.name || row.display_name || '').slice(0, 120);
+    // A hit whose name shares no word with the ask is a neighbour that holds
+    // the anchor ("Billy Bob's" inside the Stockyards), not the place asked for.
+    if (asked.size && ![...words(name)].some((word) => asked.has(word)))
+      continue;
+    candidates.push({ ring: clean, kind, name });
+  }
+  if (!candidates.length) return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return candidates[0];
+  const holding = candidates.find((c) => ringContains(c.ring, lon, lat));
+  if (holding) return holding;
+  const distance = (c) => {
+    const centre = ringCentre(c.ring);
+    return Math.hypot(
+      centre.lat - lat,
+      (centre.lon - lon) * Math.cos((lat * Math.PI) / 180),
+    );
+  };
+  return candidates.reduce((a, b) => (distance(b) < distance(a) ? b : a));
+}
+
+/** Outline lookups over the same one-per-second Nominatim budget as search. */
+export function createNominatimOutlineProvider({
+  endpoint = 'https://nominatim.openstreetmap.org/search',
+  requestJson = fetchRegionalJson,
+} = {}) {
+  const cache = new Map();
+  const inFlight = new Map();
+  return async function fetchNominatimOutline(
+    query,
+    lat,
+    lon,
+    { signal } = {},
+  ) {
+    const cacheKey = `${query.toLowerCase()}|${lat ?? ''}|${lon ?? ''}`;
+    const cached = cache.get(cacheKey);
+    if (cached && Date.now() - cached.cachedAt <= NOMINATIM_SEARCH_CACHE_MS)
+      return cached.outline;
+    const { promise } = coalesceProxyRequest(inFlight, cacheKey, async () => {
+      const params = new URLSearchParams({
+        format: 'jsonv2',
+        q: query,
+        polygon_geojson: '1',
+        // ~10 m simplification keeps a city boundary to a drawable ring.
+        polygon_threshold: '0.0001',
+        limit: '5',
+        'accept-language': 'en',
+      });
+      const rows = await enqueueNominatim(
+        () =>
+          requestJson(`${endpoint}?${params}`, {
+            headers: NOMINATIM_HEADERS,
+            redirect: 'error',
+          }),
+        { bounded: true, signal },
+      );
+      const outline = pickNominatimOutline(rows, lat, lon, query);
+      cache.set(cacheKey, { outline, cachedAt: Date.now() });
+      while (cache.size > NOMINATIM_SEARCH_MAX_CACHE)
+        cache.delete(cache.keys().next().value);
+      return outline;
+    });
+    return await promise;
+  };
+}
+
+export const fetchNominatimOutline = createNominatimOutlineProvider();
+
 /** Vite plugin: last-resort place search over the public Nominatim instance. */
-export function geocodeProxy({ search = fetchNominatimSearch } = {}) {
+export function geocodeProxy({
+  search = fetchNominatimSearch,
+  outline = fetchNominatimOutline,
+} = {}) {
   const limiter = makeRateLimiter({
     windowMs: 60_000,
     max: 30,
@@ -188,6 +331,64 @@ export function geocodeProxy({ search = fetchNominatimSearch } = {}) {
   });
 
   function install(middlewares) {
+    // Mounted before /api/geocode, which would otherwise take this path too.
+    middlewares.use('/api/geocode/outline', async (req, res) => {
+      const reply = (status, body, headers = {}) => {
+        if (res.writableEnded) return;
+        res.writeHead(status, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+          ...headers,
+        });
+        res.end(JSON.stringify(body));
+      };
+      if (req.method !== 'GET')
+        return reply(405, { error: 'Method Not Allowed' });
+      if (!limiter(clientKey(req)))
+        return reply(
+          429,
+          { error: 'Rate limit exceeded' },
+          { 'Retry-After': '10' },
+        );
+      const url = new URL(req.url || '', 'http://localhost');
+      const query = String(url.searchParams.get('q') || '').trim();
+      if (!query || query.length > NOMINATIM_SEARCH_MAX_QUERY)
+        return reply(400, {
+          error: 'A place query of 1-200 characters is required',
+        });
+      const coordinate = (name, limit) => {
+        const value = Number(url.searchParams.get(name));
+        return url.searchParams.has(name) && Math.abs(value) <= limit
+          ? value
+          : null;
+      };
+      const lat = coordinate('lat', 90);
+      const lon = coordinate('lon', 180);
+      const abandoned = new AbortController();
+      req.on?.('aborted', () => abandoned.abort());
+      res.on?.('close', () => abandoned.abort());
+      try {
+        const found = await outline(query, lat, lon, {
+          signal: abandoned.signal,
+        });
+        return found
+          ? reply(200, found)
+          : reply(404, { error: 'No outline for this place' });
+      } catch (error) {
+        const busy =
+          error?.code === 'NOMINATIM_QUEUE_FULL' ||
+          error?.code === 'NOMINATIM_ABANDONED';
+        return reply(
+          busy ? 429 : 503,
+          {
+            error: busy
+              ? 'Outline lookup is busy'
+              : 'Outline lookup is temporarily unavailable',
+          },
+          busy ? { 'Retry-After': '5' } : {},
+        );
+      }
+    });
     middlewares.use('/api/geocode', async (req, res) => {
       if (req.method !== 'GET') {
         res.writeHead(405, { 'Content-Type': 'application/json' });
