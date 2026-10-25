@@ -5,8 +5,7 @@
 - [x] **Not in the attack-surface inventory.** Added 2026-10-18 (H). `_shared\security\attacksurface.md` has no
       `gods-eye-view` entry, yet the app is publicly reachable (password-gated) on Cloud Run and holds
       a live `.env` including `OPENAI_API_KEY` and an unrestricted `GOOGLE_MAPS_API_KEY`. Add one.
-- [ ] `celestrak.org` outage is worked around by baked `seed-cache/` (16,049 TLEs). Self-heals when
-      celestrak returns — drop the seed cache then if image size matters.
+- [x] 2026-10-24: celestrak answers from Cloud Run again (live MISS fetch, epoch 26297); `seed-cache/` and its COPY removed. Takes effect on the next deploy.
 - [x] **Deploy the 2026-10-16 merge** (done: v16-v19, v19 live 2026-10-18) (not done; needs Andrew's go).** Bump `_IMAGE` past v14 in
       cloudbuild.yaml and `-Image` in scripts/deploy-cloudrun.ps1, build, then deploy ONLY through
       that script: it now sets `GEV_ALLOWED_HOSTS` to the service's exact hostnames. The live value
