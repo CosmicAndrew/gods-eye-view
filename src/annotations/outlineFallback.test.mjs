@@ -40,7 +40,7 @@ function harness({ outline }) {
   const outlineCalls = [];
   const outlineSource = async (query) => {
     outlineCalls.push(query);
-    return outline;
+    return typeof outline === 'function' ? outline(query) : outline;
   };
   const placeSearch = {
     async geocode() {
@@ -113,4 +113,36 @@ test('a fallback outline far from the anchor is rejected', async () => {
   const { resolve } = harness({ outline: { ring: shifted, kind: 'area' } });
   const { outline } = await resolve('Central Park, New York');
   assert.equal(outline?.ring, undefined, 'wrong-place ring not drawn');
+});
+
+// A road or river comes back as a centreline; it is drawn as a ribbon on the
+// ground instead of collapsing to a dot.
+test('a centreline from the fallback is drawn as a ground ribbon', async () => {
+  const { resolve } = harness({
+    outline: {
+      line: [
+        [-73.97, 40.78],
+        [-73.965, 40.783],
+        [-73.96, 40.786],
+      ],
+      kind: 'line',
+      category: 'highway',
+      name: 'Central Park',
+    },
+  });
+  const { outline } = await resolve('Central Park, New York');
+  assert.ok(outline?.ring?.length >= 6, 'buffered into a closed ribbon');
+  assert.equal(outline.footprintKind, 'area');
+});
+
+// Nothing matched the name: the feature at the anchor itself is traced.
+test('no named outline falls back to the feature at the anchor', async () => {
+  const { resolve, outlineCalls } = harness({
+    outline: (query) =>
+      query.query ? null : { ring: PARK_RING, kind: 'building', name: '' },
+  });
+  const { outline } = await resolve('Central Park, New York');
+  assert.equal(outlineCalls.length, 2);
+  assert.equal(outlineCalls[1].query, '');
+  assert.ok(outline?.ring?.length >= 4);
 });

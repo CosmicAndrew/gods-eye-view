@@ -411,12 +411,21 @@ export const ACTION_DESCRIPTIONS = {
             properties: {
               type: {
                 description:
-                  'pin = planted marker at a spot; highlight = pulsing ring drawing the eye to a point; area = trace the outline of a building/campus/compound/district; arrow = a connector from one place to another (use target as the origin and toTarget as the destination); route = a path through several waypoints (use the points array); label = a floating text callout.',
+                  'pin = planted marker at a spot; highlight = pulsing ring drawing the eye to a point; area = highlight any thing on the ground (building, property, park, district, road, river); arrow = a connector from one place to another (use target as the origin and toTarget as the destination); route = a path through several waypoints (use the points array); label = a floating text callout.',
                 $position: 2,
               },
               target: {
                 description:
                   'Place name to resolve ("Palace of Fine Arts, San Francisco"), or "pointer" for the spot under the cursor. A monument inside a larger landmark gets its own name + city ("Tejano Monument, Austin"), never "X at the Texas State Capitol" (that stacks them on one centroid).',
+                $position: 2,
+              },
+              entity: {
+                description:
+                  'Instead of target: a moving aircraft, ship or satellite by callsign or name; the ring follows it.',
+                $position: 2,
+              },
+              layerId: {
+                description: 'For entity: its layer, if known.',
                 $position: 2,
               },
               points: {

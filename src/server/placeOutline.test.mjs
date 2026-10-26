@@ -97,3 +97,46 @@ test('a hit sharing no name word with the ask is never picked', () => {
   );
   assert.ok(pickNominatimOutline(rows, 32.79, -97.35, "Billy Bob's"));
 });
+
+test('a road or river hit returns its centreline', () => {
+  const line = [
+    [-122.42, 37.8],
+    [-122.41, 37.801],
+    [-122.4, 37.802],
+  ];
+  const picked = pickNominatimOutline(
+    [
+      {
+        name: 'Lombard Street',
+        category: 'highway',
+        geojson: { type: 'LineString', coordinates: line },
+      },
+    ],
+    37.801,
+    -122.41,
+    'Lombard Street, San Francisco',
+  );
+  assert.equal(picked.kind, 'line');
+  assert.equal(picked.category, 'highway');
+  assert.deepEqual(picked.line, line);
+  assert.equal(picked.ring, undefined);
+});
+
+test('coordinates alone reverse-look-up the feature at that spot', async () => {
+  const urls = [];
+  const fetchOutline = createNominatimOutlineProvider({
+    requestJson: async (url) => {
+      urls.push(url);
+      return {
+        name: '',
+        category: 'building',
+        geojson: { type: 'Polygon', coordinates: [square(1, 2, 0.0002)] },
+      };
+    },
+  });
+  const found = await fetchOutline('', 2, 1);
+  assert.equal(found?.kind, 'building');
+  assert.match(urls[0], /\/reverse\?/);
+  assert.match(urls[0], /polygon_geojson=1/);
+  assert.match(urls[0], /zoom=18/);
+});

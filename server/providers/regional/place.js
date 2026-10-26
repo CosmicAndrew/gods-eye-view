@@ -205,6 +205,17 @@ function outerRing(geometry) {
   return best;
 }
 
+/** Centreline of a GeoJSON LineString/MultiLineString, the longest part for a multi. */
+function centreline(geometry) {
+  if (geometry?.type === 'LineString') return geometry.coordinates || null;
+  if (geometry?.type !== 'MultiLineString') return null;
+  let best = null;
+  for (const line of geometry.coordinates || []) {
+    if (Array.isArray(line) && line.length > (best?.length || 0)) best = line;
+  }
+  return best;
+}
+
 function ringContains(ring, lon, lat) {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -231,9 +242,12 @@ function ringCentre(ring) {
 
 /**
  * Choose the outline among Nominatim polygon hits: the one holding the
- * anchor, else the nearest. Point-only hits (most POIs) carry no outline.
+ * anchor, else the nearest. Roads and rivers come back as a centreline
+ * (`kind: 'line'`) for the client to buffer. Point-only hits (most POIs)
+ * carry no outline.
  *
- * @returns {{ ring: number[][], kind: 'building'|'area', name: string } | null}
+ * @returns {{ ring: number[][], kind: 'building'|'area', name: string }
+ *   | { line: number[][], kind: 'line', category: string, name: string } | null}
  */
 export function pickNominatimOutline(rows, lat, lon, query = '') {
   // The feature part only: "Fort Worth Stockyards, Fort Worth, Texas" must not
@@ -242,28 +256,36 @@ export function pickNominatimOutline(rows, lat, lon, query = '') {
   const candidates = [];
   for (const row of Array.isArray(rows) ? rows : []) {
     const ring = outerRing(row?.geojson);
-    if (!Array.isArray(ring) || ring.length < 4) continue;
-    const clean = ring
+    const line = ring ? null : centreline(row?.geojson);
+    const points = ring || line;
+    const minimum = ring ? 4 : 2;
+    if (!Array.isArray(points) || points.length < minimum) continue;
+    const clean = points
       .filter((p) => Number.isFinite(p?.[0]) && Number.isFinite(p?.[1]))
       .map(([x, y]) => [x, y]);
-    if (clean.length < 4 || clean.length > OUTLINE_MAX_VERTICES) continue;
-    const kind =
-      (row.category || row.class) === 'building' || row.type === 'building'
-        ? 'building'
-        : 'area';
+    if (clean.length < minimum || clean.length > OUTLINE_MAX_VERTICES) continue;
+    const category = String(row.category || row.class || '');
     const name = String(row.name || row.display_name || '').slice(0, 120);
     // A hit whose name shares no word with the ask is a neighbour that holds
     // the anchor ("Billy Bob's" inside the Stockyards), not the place asked for.
     if (asked.size && ![...words(name)].some((word) => asked.has(word)))
       continue;
+    if (line) {
+      candidates.push({ line: clean, kind: 'line', category, name });
+      continue;
+    }
+    const kind =
+      category === 'building' || row.type === 'building' ? 'building' : 'area';
     candidates.push({ ring: clean, kind, name });
   }
   if (!candidates.length) return null;
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return candidates[0];
-  const holding = candidates.find((c) => ringContains(c.ring, lon, lat));
+  const holding = candidates.find(
+    (c) => c.ring && ringContains(c.ring, lon, lat),
+  );
   if (holding) return holding;
   const distance = (c) => {
-    const centre = ringCentre(c.ring);
+    const centre = ringCentre(c.ring || c.line);
     return Math.hypot(
       centre.lat - lat,
       (centre.lon - lon) * Math.cos((lat * Math.PI) / 180),
@@ -289,25 +311,38 @@ export function createNominatimOutlineProvider({
     const cached = cache.get(cacheKey);
     if (cached && Date.now() - cached.cachedAt <= NOMINATIM_SEARCH_CACHE_MS)
       return cached.outline;
+    // No name: whatever feature sits at the coordinates (the spot under the
+    // cursor, or an address whose name matched nothing).
+    const reverse = !query && Number.isFinite(lat) && Number.isFinite(lon);
     const { promise } = coalesceProxyRequest(inFlight, cacheKey, async () => {
       const params = new URLSearchParams({
         format: 'jsonv2',
-        q: query,
+        ...(reverse
+          ? { lat: String(lat), lon: String(lon), zoom: '18' }
+          : { q: query, limit: '5' }),
         polygon_geojson: '1',
-        // ~10 m simplification keeps a city boundary to a drawable ring.
-        polygon_threshold: '0.0001',
-        limit: '5',
+        // ~10 m simplification keeps a city boundary to a drawable ring; a
+        // single building needs ~1 m.
+        polygon_threshold: reverse ? '0.00001' : '0.0001',
         'accept-language': 'en',
       });
+      const url = reverse
+        ? `${endpoint.replace(/\/search$/, '/reverse')}?${params}`
+        : `${endpoint}?${params}`;
       const rows = await enqueueNominatim(
         () =>
-          requestJson(`${endpoint}?${params}`, {
+          requestJson(url, {
             headers: NOMINATIM_HEADERS,
             redirect: 'error',
           }),
         { bounded: true, signal },
       );
-      const outline = pickNominatimOutline(rows, lat, lon, query);
+      const outline = pickNominatimOutline(
+        reverse ? [rows] : rows,
+        lat,
+        lon,
+        query,
+      );
       cache.set(cacheKey, { outline, cachedAt: Date.now() });
       while (cache.size > NOMINATIM_SEARCH_MAX_CACHE)
         cache.delete(cache.keys().next().value);
@@ -352,10 +387,6 @@ export function geocodeProxy({
         );
       const url = new URL(req.url || '', 'http://localhost');
       const query = String(url.searchParams.get('q') || '').trim();
-      if (!query || query.length > NOMINATIM_SEARCH_MAX_QUERY)
-        return reply(400, {
-          error: 'A place query of 1-200 characters is required',
-        });
       const coordinate = (name, limit) => {
         const value = Number(url.searchParams.get(name));
         return url.searchParams.has(name) && Math.abs(value) <= limit
@@ -364,6 +395,15 @@ export function geocodeProxy({
       };
       const lat = coordinate('lat', 90);
       const lon = coordinate('lon', 180);
+      // Without a name, coordinates alone look up the feature at that spot.
+      if (
+        query.length > NOMINATIM_SEARCH_MAX_QUERY ||
+        (!query && (lat === null || lon === null))
+      )
+        return reply(400, {
+          error:
+            'A place query of 1-200 characters, or lat and lon, is required',
+        });
       const abandoned = new AbortController();
       req.on?.('aborted', () => abandoned.abort());
       res.on?.('close', () => abandoned.abort());

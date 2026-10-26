@@ -736,16 +736,26 @@ export function createAnnotationResolver({
     const resolveOutline = async () => {
       const fp = await resolveOsmOutline();
       if (!isUnavailableCapability(fp)) return fp;
-      const fallback = await outlineSource({
-        query: target || matchName,
-        lat,
-        lon,
-        signal,
-      }).catch(() => null);
-      if (!Array.isArray(fallback?.ring) || fallback.ring.length < 3) return fp;
+      const lookup = (query) =>
+        outlineSource({ query, lat, lon, signal }).catch(() => null);
+      const drawable = (found) =>
+        (Array.isArray(found?.ring) && found.ring.length >= 3) ||
+        (Array.isArray(found?.line) && found.line.length >= 2);
+      const named = target || matchName;
+      let fallback = named ? await lookup(named) : null;
+      // Nothing by that name (or no name: the spot under the cursor): trace
+      // whatever feature sits at the anchor itself.
+      if (!drawable(fallback)) fallback = await lookup('');
+      if (!drawable(fallback)) return fp;
+      // Roads and rivers arrive as a centreline: a ribbon on the ground.
+      const ring = fallback.ring
+        ? closeRing([...fallback.ring])
+        : bufferCorridor(
+            fallback.line,
+            fallback.category === 'waterway' ? 25 : 11,
+          );
       // A by-name search can return a same-named place elsewhere; the outline
       // must hold the anchor, or sit beside it (a building's entrance pin).
-      const ring = closeRing([...fallback.ring]);
       const centre = ringCentroid(ring);
       if (
         !pointInPolygon(lon, lat, ring) &&

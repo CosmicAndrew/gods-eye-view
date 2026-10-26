@@ -15,6 +15,7 @@ export function initAnnotations({
   tileset = null,
   placeSearch,
   resolver,
+  locateEntity = null,
 }) {
   // World-space footprint draping; clamped marks can use the photoreal tiles.
   if (tileset) {
@@ -30,6 +31,7 @@ export function initAnnotations({
     renderer,
     placeSearch,
     resolveTarget: resolver?.resolveAnnotationTarget,
+    locateEntity,
   });
   window.__gevAnnotations = engine;
   return engine;

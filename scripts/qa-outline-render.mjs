@@ -97,7 +97,13 @@ try {
   const result = await page.evaluate(async (list) => {
     const engine = window.__godsEyeView.annotations;
     return engine.annotate(
-      list.map((target) => ({ type: 'area', target })),
+      // "@lat,lon" is a bare coordinate, as a pointer target arrives.
+      list.map((target) => {
+        const at = /^@(-?[\d.]+),(-?[\d.]+)$/.exec(target);
+        return at
+          ? { type: 'area', latitude: Number(at[1]), longitude: Number(at[2]) }
+          : { type: 'area', target };
+      }),
       { clearPrevious: true, flyTo: false },
     );
   }, targets);
