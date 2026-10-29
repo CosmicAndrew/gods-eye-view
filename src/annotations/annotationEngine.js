@@ -55,6 +55,8 @@ const MAX_LIVE_ANNOTATIONS = 120;
 // no-polygon answer is never retried.
 const OUTLINE_RETRY_DELAYS_MS = [8000, 25000];
 const OUTLINE_UPGRADE_CONCURRENCY = 2;
+// How often a mark on an aircraft, ship or satellite moves to its position.
+const FOLLOW_INTERVAL_MS = 1000;
 
 /**
  * Run a deferred-outline resolver with transient-retry backoff. Tri-state contract
@@ -103,6 +105,43 @@ export async function resolveOutlineWithRetry(
   }
 }
 
+// Radius (m) of the approximate ground ring drawn when an area has no traceable
+// outline, by what the target is: a house or a statue, a campus, a district.
+const GROUND_RING_RADIUS_M = {
+  district: 600,
+  compound: 150,
+  street: 40,
+};
+const GROUND_RING_DEFAULT_M = 20;
+
+/**
+ * Approximate flat ring around an anchor, in resolveOutline's footprint shape
+ * and marked synthesized so it draws as approximate. Exported for tests.
+ */
+export function groundRing(anchor, entityKind = null) {
+  const radiusM = GROUND_RING_RADIUS_M[entityKind] ?? GROUND_RING_DEFAULT_M;
+  const mPerDegLat = 111320;
+  const mPerDegLon = mPerDegLat * Math.cos((anchor.lat * Math.PI) / 180);
+  const ring = [];
+  const N = 32;
+  for (let i = 0; i <= N; i++) {
+    const a = (i / N) * Math.PI * 2;
+    ring.push([
+      anchor.lon + (Math.cos(a) * radiusM) / mPerDegLon,
+      anchor.lat + (Math.sin(a) * radiusM) / mPerDegLat,
+    ]);
+  }
+  return {
+    ring,
+    footprintKind: 'area',
+    buildingHeight: null,
+    synthesized: true,
+    lat: anchor.lat,
+    lon: anchor.lon,
+    height: anchor.height,
+  };
+}
+
 /**
  * Pending-phase dedup key for a NAMED target: lowercased, trimmed, and stripped of
  * trailing comma-separated locality qualifiers — so "California" and "California,
@@ -125,11 +164,16 @@ export function createAnnotationEngine({
   renderer,
   outlineRetryDelaysMs = OUTLINE_RETRY_DELAYS_MS,
   resolveTarget = resolveAnnotationTarget,
+  // (query, layerId?) => {id, layerId, label, lat, lon, height} | null: a live
+  // aircraft, ship or satellite. Marks on one follow it (see syncFollowing).
+  locateEntity = null,
+  followIntervalMs = FOLLOW_INTERVAL_MS,
 }) {
   /** @type {Map<string, object>} live annotations keyed by id */
   const annotations = new Map();
   let destroyed = false;
   let tickHandle = null;
+  let followHandle = null;
   let assistFlightUntil = 0; // camera-assist debounce (see ensureMarksVisible)
   // Generation token + in-flight fetch controllers guard against clear / new-topic
   // races: a slow resolve belonging to a superseded annotate() call must never
@@ -466,6 +510,7 @@ export function createAnnotationEngine({
     if (ids.length) {
       renderer.sync(annotations);
       ensureTicking();
+      if (ids.some((id) => annotations.get(id)?.follow)) startFollowing();
     }
     if (opts.flyTo && firstAnchor) frameAnnotation(firstAnchor);
     else if (ids.length) ensureMarksVisible(ids);
@@ -481,8 +526,73 @@ export function createAnnotationEngine({
     };
   }
 
+  /** A live entity's current position, or null when it is not on the map. */
+  function locate(query, layerId) {
+    try {
+      const hit = locateEntity?.(query, layerId || null);
+      return hit && Number.isFinite(hit.lat) && Number.isFinite(hit.lon)
+        ? hit
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Move every following mark to its entity's current position. A mark whose
+   * entity has dropped off the map stays where it was last seen.
+   */
+  function syncFollowing() {
+    let following = false;
+    for (const anno of annotations.values()) {
+      if (!anno.follow) continue;
+      following = true;
+      const hit = locate(anno.follow.query, anno.follow.layerId);
+      if (!hit) continue;
+      anno.anchor = {
+        lon: hit.lon,
+        lat: hit.lat,
+        height: Number.isFinite(hit.height) ? hit.height : anno.anchor.height,
+      };
+      renderer.update(anno);
+    }
+    if (!following) stopFollowing();
+  }
+
+  function startFollowing() {
+    if (destroyed || followHandle != null) return;
+    followHandle = setInterval(syncFollowing, followIntervalMs);
+  }
+
+  function stopFollowing() {
+    if (followHandle == null) return;
+    clearInterval(followHandle);
+    followHandle = null;
+  }
+
   async function resolveSpec(spec, signal, allowDistant = false) {
     const type = normalizeType(spec?.type);
+    const entity = typeof spec?.entity === 'string' ? spec.entity.trim() : '';
+    if (entity) {
+      const hit = locate(entity, spec.layerId);
+      if (!hit)
+        throw new Error(
+          'could not find that aircraft, ship or satellite on the map',
+        );
+      return {
+        lon: hit.lon,
+        lat: hit.lat,
+        height: Number.isFinite(hit.height) ? hit.height : 0,
+        label: hit.label || null,
+        ring: null,
+        source: 'entity',
+        // Later lookups use the stable id, not the spoken name.
+        follow: {
+          query: String(hit.id || entity),
+          layerId: hit.layerId || spec.layerId || null,
+        },
+      };
+    }
     // MANUAL geometry (drawTool.js): the person clicked the vertices, so there is
     // nothing to resolve. Same record shapes as a resolved spec, source 'manual'.
     if (isManualSpec(spec, type)) return resolveManualSpec(spec, type, viewer);
@@ -677,6 +787,10 @@ export function createAnnotationEngine({
       if (myGen !== generation || controller.signal.aborted) return; // board superseded
       if (!annotations.has(anno.id)) return; // mark replaced/removed while resolving
       anno.pendingOutline = false;
+      // Every asked-for area ends as a highlight on the ground: with no traced
+      // outline, an approximate ring sized to the kind of thing replaces the dot.
+      if (anno.type === 'area' && (!fp?.ring || isUnavailableCapability(fp)))
+        fp = groundRing(anno.anchor, anno.entityKind);
       anno.outlineUnavailable = isUnavailableCapability(fp);
       if (anno.outlineUnavailable) renderer.update(anno);
       if (fp && !anno.outlineUnavailable) {
@@ -865,7 +979,12 @@ export function createAnnotationEngine({
   }
 
   function buildAnnotation(spec, resolved, persist) {
-    const type = normalizeType(spec?.type);
+    const asked = normalizeType(spec?.type);
+    // A moving thing has no outline to trace: it gets the pulsing ring.
+    const type =
+      resolved?.follow && asked !== 'pin' && asked !== 'label'
+        ? 'highlight'
+        : asked;
     const id = `anno-${++_seq}`;
     const color = COLORS.has(spec?.color) ? spec.color : 'primary';
     const label =
@@ -953,6 +1072,9 @@ export function createAnnotationEngine({
       // coord/pixel specs, which never pending-collapse).
       targetKey: normalizeTargetKey(spec?.target),
       intentKey: spec?.intent === 'around_the_thing' ? 'around' : 'thing',
+      follow: resolved.follow || null,
+      // Sizes the approximate ground ring when no outline can be traced.
+      entityKind: ENTITY_KINDS.has(spec?.entityKind) ? spec.entityKind : null,
       // Places viewport (lat/lng box framing the feature) — sizes the flyTo range while
       // no ring exists yet.
       viewport: resolved.viewport || null,
@@ -1108,6 +1230,7 @@ export function createAnnotationEngine({
       } finally {
         if (tickHandle != null) cancelAnimationFrame(tickHandle);
         tickHandle = null;
+        stopFollowing();
         outlineListeners.clear();
         releaseContinuousRender('annotations');
         renderer.destroy();

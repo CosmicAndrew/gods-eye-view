@@ -69,6 +69,7 @@ test('analyst_query: "how many flights around here" becomes a radius at the poin
   assert.match(resolveDeicticArgs('analyst_query', { scope: { kind: 'pointer' } }, {}).error, /Nothing is under/);
 });
 
+// Pointing at an aircraft also names it, so the mark follows it.
 test('annotate_map: pointer targets become coordinates and keep the label', () => {
   const out = resolveDeicticArgs(
     'annotate_map',
@@ -82,7 +83,14 @@ test('annotate_map: pointer targets become coordinates and keep the label', () =
     { pointer: aircraft },
   );
   const [pin, arrow, route] = out.args.annotations;
-  assert.deepEqual(pin, { type: 'pin', latitude: 30.2, longitude: -97.7, label: 'UPS793' });
+  assert.deepEqual(pin, {
+    type: 'pin',
+    latitude: 30.2,
+    longitude: -97.7,
+    label: 'UPS793',
+    entity: 'a1b2c3',
+    layerId: 'flights',
+  });
   assert.deepEqual(arrow, { type: 'arrow', target: 'Texas State Capitol', toLatitude: 30.2, toLongitude: -97.7 });
   assert.deepEqual(route.points[1], { latitude: 30.2, longitude: -97.7 });
 });
@@ -179,4 +187,17 @@ test('numbered custom-labeled pins retain their resolved coordinates', () => {
   referents.recordResult('annotate_map', result);
   assert.deepEqual(resolveDeicticArgs('fly_to_location', { referent: 1 }, { referents }).args,
     { latitude: 30.27, longitude: -97.74 });
+});
+
+test('annotate_map: a pointer on the ground names no entity', () => {
+  const out = resolveDeicticArgs(
+    'annotate_map',
+    { annotations: [{ type: 'area', target: 'pointer' }] },
+    { pointer: ground },
+  );
+  assert.deepEqual(out.args.annotations[0], {
+    type: 'area',
+    latitude: 30.27,
+    longitude: -97.74,
+  });
 });

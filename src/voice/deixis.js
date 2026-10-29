@@ -238,6 +238,11 @@ function resolveAnnotate(args, { pointer }) {
       next.latitude = target.lat;
       next.longitude = target.lon;
       if (!next.label && target.label) next.label = target.label;
+      // Pointing at an aircraft, ship or satellite: the mark follows it.
+      if (TRACKABLE_LAYERS.has(target.layerId) && target.id) {
+        next.entity = String(target.id);
+        next.layerId = target.layerId;
+      }
     }
     if (isPointer(spec.toTarget)) {
       next = withoutKeys(next, ['toTarget']);

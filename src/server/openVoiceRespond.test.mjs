@@ -17,7 +17,7 @@ import {
 } from '../../server/providers/openai/open-voice.js';
 import { createRealtimeTokenHandler } from '../../server/providers/openai/realtime.js';
 
-const KEYS = ['DEEPSEEK_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'GEV_VOICE_OPEN_PROVIDERS', 'GEV_VOICE_ENGINE', 'GEV_RATELIMIT_OPEN_VOICE_PER_MIN', 'OPENAI_API_KEY'];
+const KEYS = ['DEEPSEEK_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'GEV_VOICE_OPEN_PROVIDERS', 'GEV_VOICE_ENGINE', 'GEV_RATELIMIT_OPEN_VOICE_PER_MIN', 'OPENAI_API_KEY', 'GEV_VOICE_LOG_CONTENT'];
 
 function setEnv(t, values) {
   const saved = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
@@ -146,6 +146,49 @@ test('the voice token route reports the open engine instead of calling OpenAI', 
   assert.equal(reply.status, 200);
   assert.equal(reply.json.engine, 'open');
   assert.equal(reply.headers['x-gev-voice-engine'], 'open');
+});
+
+test('with content logging on, each turn is one structured stdout line', async (t) => {
+  setEnv(t, { DEEPSEEK_API_KEY: 'ds', GEV_VOICE_LOG_CONTENT: '1' });
+  t.mock.method(globalThis, 'fetch', async () => Response.json({
+    choices: [{ message: { content: 'Tracing it.', tool_calls: [{ id: 'call_2', function: { name: 'annotate_map', arguments: '{"type":"area","target":"Presidio"}' } }] } }],
+  }));
+  const lines = [];
+  t.mock.method(console, 'log', (line) => lines.push(line));
+  const handler = createOpenVoiceRespondHandler({ tools: TOOLS, instructions: () => 'S' });
+  await invoke(handler, { body: turn([
+    { role: 'user', content: 'fly to san francisco' },
+    { role: 'assistant', content: 'Flying.', tool_calls: [{ id: 'call_1', name: 'fly_to_location', arguments: '{"query":"San Francisco"}' }] },
+    { role: 'tool', tool_call_id: 'call_1', content: '{"ok":true}' },
+    { role: 'assistant', content: 'Here it is.' },
+    { role: 'user', content: 'trace the presidio' },
+  ]) });
+  assert.equal(lines.length, 1);
+  const record = JSON.parse(lines[0]);
+  assert.equal(record.event, 'open_voice.turn');
+  assert.equal(record.severity, 'INFO');
+  assert.equal(record.provider, 'deepseek');
+  // Only what arrived since the model last spoke, so a turn is logged once.
+  assert.deepEqual(record.heard, [{ said: 'trace the presidio' }]);
+  assert.equal(record.reply, 'Tracing it.');
+  assert.deepEqual(record.tool_calls, [{ name: 'annotate_map', arguments: '{"type":"area","target":"Presidio"}' }]);
+
+  await invoke(handler, { body: turn([
+    { role: 'user', content: 'fly to paris' },
+    { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', name: 'fly_to_location', arguments: '{}' }] },
+    { role: 'tool', tool_call_id: 'call_1', content: '{"ok":true}' },
+  ]) });
+  assert.deepEqual(JSON.parse(lines[1]).heard, [{ tool: 'fly_to_location', result: '{"ok":true}' }]);
+});
+
+test('turns are not logged unless content logging is on', async (t) => {
+  setEnv(t, { DEEPSEEK_API_KEY: 'ds' });
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ choices: [{ message: { content: 'ok' } }] }));
+  const lines = [];
+  t.mock.method(console, 'log', (line) => lines.push(line));
+  const handler = createOpenVoiceRespondHandler({ tools: TOOLS, instructions: () => 'S' });
+  await invoke(handler, { body: turn([{ role: 'user', content: 'hi' }]) });
+  assert.deepEqual(lines, []);
 });
 
 test('the engine stays OpenAI unless asked', (t) => {

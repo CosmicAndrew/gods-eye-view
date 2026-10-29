@@ -1,5 +1,6 @@
 import { SceneDirector } from '../scenes/director.js';
 import { initAnnotations } from '../annotations/index.js';
+import { createEntityLocator } from '../annotations/entityLocator.js';
 import { initDrawTool } from '../annotations/drawTool.js';
 import { initGeoFileImport } from '../ui/geoFileImport.js';
 import { initImageryBoxTool } from '../ui/imageryBoxTool.js';
@@ -47,6 +48,7 @@ export function createApplicationTools({
     tileset,
     placeSearch,
     resolver: operations.annotationResolver,
+    locateEntity: createEntityLocator(dataManager),
   });
   defer(() => {
     if (window.__gevAnnotations === annotations) delete window.__gevAnnotations;

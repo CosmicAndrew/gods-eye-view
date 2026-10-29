@@ -81,3 +81,24 @@ test('replies are spoken in sentence-sized chunks', () => {
   assert.ok(speechChunks(long).every((chunk) => chunk.length <= 220));
   assert.deepEqual(speechChunks('  '), []);
 });
+
+// Live Fish synthesis of a 220-character opening took 6.8 s, past the 4 s
+// deadline, and the rest of that reply fell back to the browser voice.
+test('a long opening is cut at a clause so the first clip arrives in time', () => {
+  const opening =
+    'I traced the outline of Golden Gate Park, moved the camera over it, and dropped a label at the centre so you can see the whole perimeter.';
+  const chunks = speechChunks(`${opening} Anything else?`);
+  assert.ok(chunks[0].length <= 80, chunks[0]);
+  assert.match(chunks[0], /,$/);
+  assert.equal(chunks.join(' '), `${opening} Anything else?`);
+  assert.equal(chunks.at(-1), 'Anything else?');
+});
+
+test('a long sentence after a short one is cut so it is ready when that one ends', () => {
+  const long = `The ${'very '.repeat(40)}long one.`;
+  const chunks = speechChunks(`Done. ${long}`);
+  assert.equal(chunks[0], 'Done.');
+  // Each chunk fits 80 characters plus three times the one before it.
+  chunks.slice(1).forEach((chunk, i) => assert.ok(chunk.length <= 80 + 3 * chunks[i].length, chunk));
+  assert.equal(chunks.join(' '), `Done. ${long}`);
+});

@@ -591,6 +591,14 @@ const schemas = [
                 type: 'string',
                 maxLength: 200,
               },
+              entity: {
+                type: 'string',
+                maxLength: 120,
+              },
+              layerId: {
+                type: 'string',
+                enum: ['flights', 'military', 'ais-live-vessels', 'satellites'],
+              },
               points: {
                 type: 'array',
                 minItems: 2,

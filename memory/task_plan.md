@@ -1,7 +1,8 @@
 # gods-eye-view — task plan (open punch list)
 
-- [ ] **FIRMS + AISStream free API keys** — Andrew must register; both layers show a KEY REQUIRED
-      state until then. Carried over from the 2026-08-29 entry in `_categories\AI-OS\memory\decisions.md`.
+- [x] **FIRMS + AISStream free API keys** (done by v20; re-verified live on v22 2026-10-25: FIRMS 200
+      with 181,819 fires from 4 sources, vessels `live` with `keyRequired:false`). Carried over from the
+      2026-08-29 entry in `_categories\AI-OS\memory\decisions.md`.
 - [x] **Not in the attack-surface inventory.** Added 2026-10-18 (H). `_shared\security\attacksurface.md` has no
       `gods-eye-view` entry, yet the app is publicly reachable (password-gated) on Cloud Run and holds
       a live `.env` including `OPENAI_API_KEY` and an unrestricted `GOOGLE_MAPS_API_KEY`. Add one.

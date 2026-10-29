@@ -358,7 +358,9 @@ test('installation capability miss switches to tiles once, including later viewp
   assert.equal(first.tileSource, true);
 });
 
-test('annotation capability miss keeps its pin and exposes the unavailable label without a synthetic ring', async (t) => {
+// A capability miss used to leave a bare pin; every asked-for area now ends
+// as an approximate ring on the ground, reported as approximate.
+test('annotation capability miss draws an approximate ground ring', async (t) => {
   const prior = globalThis.requestAnimationFrame;
   const priorCancel = globalThis.cancelAnimationFrame;
   globalThis.requestAnimationFrame = () => 1;
@@ -408,10 +410,11 @@ test('annotation capability miss keeps its pin and exposes the unavailable label
   for (let i = 0; i < 30; i++) await Promise.resolve();
   assert.equal(engine.count(), 1);
   assert.equal(attempts, 1);
-  assert.equal(updated.outlineUnavailable, true);
-  assert.ok(!updated.ring && !updated.synthesized);
-  assert.equal(engine.list()[0].outlineUnavailable, true);
-  assert.equal(event.message, 'Detailed outline unavailable');
+  assert.equal(updated.outlineUnavailable, false);
+  assert.ok(updated.ring?.length >= 4 && updated.synthesized);
+  assert.equal(updated.footprintKind, 'area');
+  assert.equal(event.status, 'resolved');
+  assert.equal(event.approximate, true);
 });
 
 test('configured URL credentials stay server-side and never appear in returned metadata', async () => {

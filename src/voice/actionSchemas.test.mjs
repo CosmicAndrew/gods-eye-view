@@ -38,7 +38,8 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // requested radius and center authority in descriptions only.
     // Street Level and GNSS extend the manifest; tracked and analyst aircraft describe broadcasts.
     // Air quality (ECCC AQHI) extends the manifest.
-    '775ba323384b4c1b62fb8415bac52aecc3fc668e20bedcfa57e426dcd1da3969',
+    // annotate_map gains entity + layerId (highlight a moving thing).
+    '8e49546705c74be5e698f66e02880db43986c9848e891e7fc2d85e6fa1e7bfdd',
   );
 });
 
@@ -135,6 +136,10 @@ test('all legacy action arguments are byte-identical after removing the delibera
     delete center.properties[axis].minimum;
     delete center.properties[axis].maximum;
   }
+  // Highlighting a moving aircraft, ship or satellite adds entity + layerId.
+  const annotationItem = property('annotate_map').annotations.items.properties;
+  delete annotationItem.entity;
+  delete annotationItem.layerId;
   // Cyber adds one HUD layout.
   const hud = property('set_hud').layout;
   hud.enum = hud.enum.filter((layout) => layout !== 'cyber');
